@@ -1,0 +1,22 @@
+# Port Allocation Map
+
+## Deploy (main worktree)
+
+| Project | APP_PORT | FRONTEND_PORT | PG_PORT | REDIS_PORT | Other |
+|---------|----------|-------------|---------|-----------|-------|
+| bloasis | 8000 | 3000 | 5432 | 6379 | GRAFANA_PORT=3001, PROMETHEUS_PORT=9090 |
+| BSGateway | 4000 | - | 5433 | 6380 | - |
+| BSNexus | 8100 | 3100 | 5434 | 6381 | - |
+| bsai | 8200 | 3200 | 5435 | 6382 | KEYCLOAK_PORT=8443 |
+| BSForge | 8300 | - | 5436 | 6383 | FLOWER_PORT=5555 |
+| BSage | 8400 | - | - | - | - |
+| MetaSummarizer | - | - | - | - | CLI only |
+
+## DevContainer (agent worktree) — +10000 offset
+
+| Slot | Rule | Example (bloasis) |
+|------|------|-------------------|
+| deploy (main) | defaults | 8000/3000/5432/6379 |
+| wt-1 | +10000 | 18000/13000/15432/16379 |
+| wt-2 | +10001 | 18001/13001/15433/16380 |
+| wt-3 | +10002 | 18002/13002/15434/16381 |
