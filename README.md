@@ -2,6 +2,16 @@
 
 Scripts and configs for managing a multi-project development environment — worktree automation, port allocation, auto-deploy.
 
+## Setup
+
+```bash
+git clone https://github.com/blas1n/workstation.git ~/Works/_infra
+
+# Register launchd jobs
+ln -sf ~/Works/_infra/launchd/com.blas1n.autodeploy.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.blas1n.autodeploy.plist
+```
+
 ## Project Layout
 
 All projects follow the bare repo + worktree pattern:
