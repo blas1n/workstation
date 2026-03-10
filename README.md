@@ -10,6 +10,9 @@ git clone https://github.com/blas1n/workstation.git ~/Works/_infra
 # Register launchd jobs
 ln -sf ~/Works/_infra/launchd/com.blas1n.autodeploy.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.blas1n.autodeploy.plist
+
+# Initial docker compose up for all projects
+scripts/bootstrap.sh
 ```
 
 ## Project Layout
@@ -91,6 +94,14 @@ Shows all worktrees and running Docker containers across projects.
 
 ```bash
 scripts/status.sh
+```
+
+### bootstrap.sh
+
+Initial `docker compose up` for all projects. Run once on a new machine after cloning repos.
+
+```bash
+scripts/bootstrap.sh
 ```
 
 ### autodeploy.sh
