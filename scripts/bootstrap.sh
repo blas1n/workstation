@@ -9,7 +9,7 @@ for name in "${PROJECTS[@]}"; do
   [ ! -f "$COMPOSE" ] && continue
 
   echo "==> Starting ${name}..."
-  docker compose -f "$COMPOSE" up -d --build
+  docker-compose -f "$COMPOSE" up -d --build
 done
 
 echo "==> Done"

@@ -20,7 +20,7 @@ for name in "${PROJECTS[@]}"; do
   if [ -n "$REMOTE" ] && [ "$LOCAL" != "$REMOTE" ]; then
     echo "$(date) [${name}] Deploying ${REMOTE:0:7}..." >> "$LOG"
     git -C "$WORK" merge origin/main --ff-only 2>> "$LOG"
-    docker compose -f "$COMPOSE" up -d --build >> "$LOG" 2>&1
+    docker-compose -f "$COMPOSE" up -d --build >> "$LOG" 2>&1
     echo "$(date) [${name}] Done" >> "$LOG"
   fi
 done
