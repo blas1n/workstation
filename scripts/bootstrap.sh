@@ -9,6 +9,7 @@ for name in "${PROJECTS[@]}"; do
   [ ! -f "$COMPOSE" ] && continue
 
   echo "==> Starting ${name}..."
+  docker-compose -f "$COMPOSE" down --remove-orphans 2>/dev/null || true
   docker-compose -f "$COMPOSE" up -d --build
 done
 
