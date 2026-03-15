@@ -38,7 +38,8 @@ if [ -z "$WT_NAME" ]; then
     slot="-"
     [ -f "${d}.wt-slot" ] && slot=$(cat "${d}.wt-slot")
     branch=$(git -C "$d" branch --show-current 2>/dev/null || echo "?")
-    printf "  %-30s slot=%-3s branch=%s\n" "$name" "$slot" "$branch"
+    dc_count=$(docker ps -a --filter "name=${name}_devcontainer" --format '.' 2>/dev/null | wc -l | tr -d ' ')
+    printf "  %-30s slot=%-3s branch=%-20s containers=%s\n" "$name" "$slot" "$branch" "$dc_count"
   done
   echo ""
   echo "Usage: $(basename "$0") ${PROJECT} <worktree-name>"
@@ -59,6 +60,27 @@ SLOT="-"
 [ -f "${WT_PATH}/.wt-slot" ] && SLOT=$(cat "${WT_PATH}/.wt-slot")
 
 echo "Removing worktree: ${PROJECT}/wt/${WT_NAME} (slot: ${SLOT})"
+
+# ─── Devcontainer cleanup ─────────────────────────────────────────
+DC_PREFIX="${WT_NAME}_devcontainer"
+CONTAINERS=$(docker ps -a --filter "name=${DC_PREFIX}" --format '{{.Names}}' 2>/dev/null || true)
+
+if [ -n "$CONTAINERS" ]; then
+  echo "Stopping devcontainer containers..."
+  docker ps -a --filter "name=${DC_PREFIX}" --format '{{.Names}}' | xargs -r docker rm -f
+  echo "  Removed $(echo "$CONTAINERS" | wc -l | tr -d ' ') container(s)"
+fi
+
+VOLUMES=$(docker volume ls --filter "name=${DC_PREFIX}" --format '{{.Name}}' 2>/dev/null || true)
+
+if [ -n "$VOLUMES" ]; then
+  read -p "Delete devcontainer volumes? [y/N] " -n 1 -r
+  echo
+  if [[ $REPLY =~ ^[Yy]$ ]]; then
+    docker volume ls --filter "name=${DC_PREFIX}" --format '{{.Name}}' | xargs -r docker volume rm
+    echo "  Removed volumes"
+  fi
+fi
 
 cd "$BARE_DIR"
 git worktree remove "$WT_PATH" --force
