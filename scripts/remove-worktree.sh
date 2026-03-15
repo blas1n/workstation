@@ -36,7 +36,7 @@ if [ -z "$WT_NAME" ]; then
     [ ! -d "$d" ] && continue
     name=$(basename "$d")
     slot="-"
-    [ -f "${d}.wt-slot" ] && slot=$(cat "${d}.wt-slot")
+    [ -f "${BARE_DIR}/worktrees/${name}/wt-slot" ] && slot=$(cat "${BARE_DIR}/worktrees/${name}/wt-slot")
     branch=$(git -C "$d" branch --show-current 2>/dev/null || echo "?")
     dc_count=$(docker ps -a --filter "name=${name}_devcontainer" --format '.' 2>/dev/null | wc -l | tr -d ' ')
     printf "  %-30s slot=%-3s branch=%-20s containers=%s\n" "$name" "$slot" "$branch" "$dc_count"
@@ -57,7 +57,7 @@ fi
 
 BRANCH=$(git -C "$WT_PATH" branch --show-current 2>/dev/null || echo "")
 SLOT="-"
-[ -f "${WT_PATH}/.wt-slot" ] && SLOT=$(cat "${WT_PATH}/.wt-slot")
+[ -f "${BARE_DIR}/worktrees/${WT_NAME}/wt-slot" ] && SLOT=$(cat "${BARE_DIR}/worktrees/${WT_NAME}/wt-slot")
 
 echo "Removing worktree: ${PROJECT}/wt/${WT_NAME} (slot: ${SLOT})"
 

@@ -68,7 +68,7 @@ if [ -z "$SLOT" ]; then
   mkdir -p "$WT_DIR"
   for i in $(seq 1 $MAX_SLOTS); do
     taken=false
-    for slotfile in "$WT_DIR"/*/".wt-slot"; do
+    for slotfile in "$BARE_DIR"/worktrees/*/wt-slot; do
       [ ! -f "$slotfile" ] 2>/dev/null && continue
       if [ "$(cat "$slotfile")" = "$i" ]; then
         taken=true
@@ -128,8 +128,8 @@ else
   git worktree add "$WT_PATH" -b "$BRANCH"
 fi
 
-# ─── Save slot marker ───────────────────────────────────────────────
-echo "$SLOT" > "${WT_PATH}/.wt-slot"
+# ─── Save slot marker (inside git dir, not working tree) ────────────
+echo "$SLOT" > "${BARE_DIR}/worktrees/${WT_NAME}/wt-slot"
 
 # ─── Generate .devcontainer/.env ─────────────────────────────────────
 DEVCONTAINER_DIR="${WT_PATH}/.devcontainer"
