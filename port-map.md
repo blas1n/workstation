@@ -5,11 +5,11 @@
 | Project | APP_PORT | FRONTEND_PORT | PG_PORT | REDIS_PORT | Other |
 |---------|----------|-------------|---------|-----------|-------|
 | bloasis | 8000 | 3000 | 5432 | 6379 | GRAFANA_PORT=3001, PROMETHEUS_PORT=9090 |
-| BSGateway | 4000 | - | 5433 | 6380 | - |
+| BSGateway | 4000 | 3300 | 5433 | 6380 | - |
 | BSNexus | 8100 | 3100 | 5434 | 6381 | - |
 | bsai | 8200 | 3200 | 5435 | 6382 | KEYCLOAK_PORT=8443 |
 | BSForge | 8300 | - | 5436 | 6383 | FLOWER_PORT=5555 |
-| BSage | 8400 | - | - | - | - |
+| BSage | 8400 | 3400 | - | - | - |
 | MetaSummarizer | - | - | - | - | CLI only |
 
 ## DevContainer (agent worktree) — +10000 offset

@@ -24,11 +24,11 @@ MAX_SLOTS=5
 get_base_ports() {
   case "$1" in
     bloasis)        echo "8000 3000 5432 6379" ;;
-    BSGateway)      echo "4000 - 5433 6380" ;;
+    BSGateway)      echo "4000 3300 5433 6380" ;;
     BSNexus)        echo "8100 3100 5434 6381" ;;
     bsai)           echo "8200 3200 5435 6382 KEYCLOAK=8080" ;;
     BSForge)        echo "8300 - 5436 6383" ;;
-    BSage)          echo "8400 - - -" ;;
+    BSage)          echo "8400 3400 - -" ;;
     MetaSummarizer) echo "- - - -" ;;
     *)              return 1 ;;
   esac
