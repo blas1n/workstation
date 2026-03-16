@@ -169,6 +169,13 @@ DCEOF
   echo "  Created: ${DEVCONTAINER_DIR}/docker-compose.override.yml"
 fi
 
+# ─── Copy .env from main worktree ──────────────────────────────────
+MAIN_WT="${WORKS_DIR}/${PROJECT}/main"
+if [ -f "$MAIN_WT/.env" ]; then
+  cp "$MAIN_WT/.env" "$WT_PATH/.env"
+  echo "  Copied:  ${MAIN_WT}/.env → ${WT_PATH}/.env"
+fi
+
 # ─── Summary ─────────────────────────────────────────────────────────
 echo ""
 echo "╭──────────────────────────────────────────╮"
