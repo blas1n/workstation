@@ -38,7 +38,8 @@ if [ -z "$WT_NAME" ]; then
     slot="-"
     [ -f "${BARE_DIR}/worktrees/${name}/wt-slot" ] && slot=$(cat "${BARE_DIR}/worktrees/${name}/wt-slot")
     branch=$(git -C "$d" branch --show-current 2>/dev/null || echo "?")
-    dc_count=$(docker ps -a --filter "name=${name}_devcontainer" --format '.' 2>/dev/null | wc -l | tr -d ' ')
+    dc_project=$(echo "${PROJECT}-${name}" | tr '[:upper:]' '[:lower:]')
+    dc_count=$(docker ps -a --filter "label=com.docker.compose.project=${dc_project}" --format '.' 2>/dev/null | wc -l | tr -d ' ')
     printf "  %-30s slot=%-3s branch=%-20s containers=%s\n" "$name" "$slot" "$branch" "$dc_count"
   done
   echo ""
@@ -62,22 +63,22 @@ SLOT="-"
 echo "Removing worktree: ${PROJECT}/wt/${WT_NAME} (slot: ${SLOT})"
 
 # ─── Devcontainer cleanup ─────────────────────────────────────────
-DC_PREFIX="${WT_NAME}_devcontainer"
-CONTAINERS=$(docker ps -a --filter "name=${DC_PREFIX}" --format '{{.Names}}' 2>/dev/null || true)
+DC_PROJECT=$(echo "${PROJECT}-${WT_NAME}" | tr '[:upper:]' '[:lower:]')
+CONTAINERS=$(docker ps -a --filter "label=com.docker.compose.project=${DC_PROJECT}" --format '{{.Names}}' 2>/dev/null || true)
 
 if [ -n "$CONTAINERS" ]; then
   echo "Stopping devcontainer containers..."
-  docker ps -a --filter "name=${DC_PREFIX}" --format '{{.Names}}' | xargs -r docker rm -f
+  docker ps -a --filter "label=com.docker.compose.project=${DC_PROJECT}" --format '{{.Names}}' | xargs -r docker rm -f
   echo "  Removed $(echo "$CONTAINERS" | wc -l | tr -d ' ') container(s)"
 fi
 
-VOLUMES=$(docker volume ls --filter "name=${DC_PREFIX}" --format '{{.Name}}' 2>/dev/null || true)
+VOLUMES=$(docker volume ls --filter "label=com.docker.compose.project=${DC_PROJECT}" --format '{{.Name}}' 2>/dev/null || true)
 
 if [ -n "$VOLUMES" ]; then
   read -p "Delete devcontainer volumes? [y/N] " -n 1 -r
   echo
   if [[ $REPLY =~ ^[Yy]$ ]]; then
-    docker volume ls --filter "name=${DC_PREFIX}" --format '{{.Name}}' | xargs -r docker volume rm
+    docker volume ls --filter "label=com.docker.compose.project=${DC_PROJECT}" --format '{{.Name}}' | xargs -r docker volume rm
     echo "  Removed volumes"
   fi
 fi
