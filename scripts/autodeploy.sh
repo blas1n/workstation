@@ -4,7 +4,7 @@
 
 export PATH="/opt/homebrew/bin:$PATH"
 
-PROJECTS=(bloasis BSGateway BSNexus bsai BSForge BSage)
+PROJECTS=(bloasis BSGateway BSNexus bsai BSForge BSage BSupervisor)
 LOG=~/Works/_infra/logs/autodeploy.log
 
 for name in "${PROJECTS[@]}"; do
