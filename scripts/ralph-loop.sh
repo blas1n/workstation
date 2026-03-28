@@ -75,14 +75,10 @@ while has_pending_tasks; do
 
   echo "=== Iteration $ITERATION | $NEXT_TASK ==="
 
-  # Read PROMPT.md content
-  PROMPT=$(cat "$PROMPT_FILE")
-
-  # Run fresh claude -p in devcontainer
+  # Run fresh claude -p in devcontainer (reads PROMPT.md via cat inside container)
   OUTPUT=$(COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" devcontainer exec \
     --workspace-folder "$WORKSPACE" -- \
-    npx -y @anthropic-ai/claude-code -p "$PROMPT" \
-    --allowedTools "Edit,Write,Bash,Read,Glob,Grep" 2>&1)
+    bash -c 'cd /workspace && claude -p "$(cat .agent/PROMPT.md)" --allowedTools "Edit,Write,Bash,Read,Glob,Grep"' 2>&1)
 
   END_TIME=$(date +%s)
   DURATION=$((END_TIME - START_TIME))

@@ -30,11 +30,12 @@ get_base_ports() {
     BSForge)        echo "8300 - 5436 6383" ;;
     BSage)          echo "8400 3400 - -" ;;
     MetaSummarizer) echo "- - - -" ;;
+    BSupervisor)    echo "8500 - 5437 6384" ;;
     *)              return 1 ;;
   esac
 }
 
-ALL_PROJECTS="bloasis BSGateway BSNexus bsai BSForge BSage MetaSummarizer"
+ALL_PROJECTS="bloasis BSGateway BSNexus bsai BSForge BSage MetaSummarizer BSupervisor"
 
 # ─── Usage ───────────────────────────────────────────────────────────
 usage() {

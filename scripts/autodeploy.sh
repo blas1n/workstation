@@ -27,7 +27,8 @@ for name in "${PROJECTS[@]}"; do
     echo "$(date) [${name}] Deploying ${REMOTE:0:7}..." >> "$LOG"
     if git -C "$WORK" merge origin/main --ff-only 2>> "$LOG"; then
       if [ -f "$COMPOSE" ]; then
-        if ! docker-compose -f "$COMPOSE" up -d --build >> "$LOG" 2>&1; then
+        PROJECT_NAME=$(echo "$name" | tr '[:upper:]' '[:lower:]')
+        if ! docker-compose -p "$PROJECT_NAME" -f "$COMPOSE" up -d --build >> "$LOG" 2>&1; then
           echo "$(date) [${name}] Build failed!" >> "$LOG"
           continue
         fi
