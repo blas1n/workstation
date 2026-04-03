@@ -1,0 +1,83 @@
+# GitHub Actions CD Template for BSVibe Backend Projects
+#
+# Copy this to each project as .github/workflows/cd.yml
+# and adjust PROJECT_NAME, HEALTH_URL, COMPOSE_PROJECT
+#
+# Prerequisites:
+#   1. GitHub Secrets:
+#      - DEPLOY_HOST: SSH host (Mac Mini IP or cloud VM)
+#      - DEPLOY_USER: SSH username
+#      - DEPLOY_KEY: SSH private key
+#      - DEPLOY_PATH: Project path on server (e.g., ~/Works/BSGateway/main)
+#
+#   2. Or use self-hosted runner on the Mac Mini:
+#      - Install: https://docs.github.com/en/actions/hosting-your-own-runners
+#      - Label: self-hosted, macos, bsvibe
+
+name: CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  # ─── Customize per project ───
+  PROJECT_NAME: bsgateway
+  HEALTH_URL: http://localhost:4000/health
+  COMPOSE_FILE: deploy/docker-compose.yml
+
+jobs:
+  # Option A: SSH-based deployment (for remote server)
+  deploy-ssh:
+    if: false  # Enable this, disable deploy-local
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            cd ${{ secrets.DEPLOY_PATH }}
+            git pull origin main --ff-only
+            docker compose -p ${{ env.PROJECT_NAME }} -f ${{ env.COMPOSE_FILE }} up -d --build
+            sleep 10
+            curl -sf ${{ env.HEALTH_URL }} || echo "Health check failed"
+
+  # Option B: Self-hosted runner (for Mac Mini)
+  deploy-local:
+    runs-on: [self-hosted, bsvibe]
+    steps:
+      - name: Pull latest
+        run: |
+          cd ~/Works/${{ github.event.repository.name }}/main
+          git fetch origin main --quiet
+          git merge origin/main --ff-only
+
+      - name: Run migrations
+        run: |
+          cd ~/Works/${{ github.event.repository.name }}/main
+          if [ -f alembic.ini ]; then
+            uv run alembic upgrade head
+          elif [ -f backend/alembic.ini ]; then
+            cd backend && uv run alembic upgrade head
+          fi
+
+      - name: Build and deploy
+        run: |
+          cd ~/Works/${{ github.event.repository.name }}/main
+          docker compose -p ${{ env.PROJECT_NAME }} -f ${{ env.COMPOSE_FILE }} up -d --build
+
+      - name: Health check
+        run: |
+          for i in $(seq 1 10); do
+            if curl -sf ${{ env.HEALTH_URL }} > /dev/null; then
+              echo "✓ Health check passed"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "✗ Health check failed"
+          exit 1
