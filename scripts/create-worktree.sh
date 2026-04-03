@@ -30,7 +30,7 @@ get_base_ports() {
     BSForge)        echo "8300 - 5436 6383" ;;
     BSage)          echo "8400 3400 - -" ;;
     MetaSummarizer) echo "- - - -" ;;
-    BSupervisor)    echo "8500 - 5437 6384" ;;
+    BSupervisor)    echo "8500 3500 5437 6384" ;;
     *)              return 1 ;;
   esac
 }
@@ -153,6 +153,7 @@ if [ -d "$DEVCONTAINER_DIR" ]; then
       PORT="${e#*=}"
       echo "EXTERNAL_${NAME}_PORT=$(( PORT + OFFSET + SLOT - 1 ))"
     done
+
   } > "$ENV_FILE"
 
   echo "  Created: ${ENV_FILE}"
