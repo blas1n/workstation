@@ -94,22 +94,6 @@ deploy_project() {
     fi
   fi
 
-  # Database migration
-  if [ "$has_alembic" = "yes" ]; then
-    log "  Running database migration..."
-    local alembic_dir="$work_dir"
-    # BSNexus has backend/ subdirectory
-    [ -f "$work_dir/backend/alembic.ini" ] && alembic_dir="$work_dir/backend"
-
-    if [ -f "$alembic_dir/alembic.ini" ]; then
-      (cd "$alembic_dir" && uv run alembic upgrade head 2>> "$LOG_FILE") || {
-        log "${RED}  Migration failed — check logs${NC}"
-        return 1
-      }
-      log "${GREEN}  Migration complete${NC}"
-    fi
-  fi
-
   # Docker Compose build + up
   if [ -f "$compose_path" ]; then
     log "  Building and starting containers..."
@@ -119,6 +103,17 @@ deploy_project() {
       log "${RED}  Container build/start failed${NC}"
       return 1
     fi
+
+  # Database migration (run inside container after build)
+  if [ "$has_alembic" = "yes" ]; then
+    log "  Running database migration..."
+    if docker compose -p "$compose_project" -f "$compose_path" run --rm --no-deps app python -m alembic upgrade head >> "$LOG_FILE" 2>&1; then
+      log "${GREEN}  Migration complete${NC}"
+    else
+      log "${RED}  Migration failed — check logs${NC}"
+      return 1
+    fi
+  fi
   fi
 
   # Health check
