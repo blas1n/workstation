@@ -1,0 +1,123 @@
+name: OpenFGA Schema
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "openfga/bsvibe.fga"
+      - "docker-compose.openfga.yml"
+      - ".github/workflows/openfga-schema.yml"
+  pull_request:
+    paths:
+      - "openfga/bsvibe.fga"
+      - ".github/workflows/openfga-schema.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Validate the .fga DSL on every PR; on main, additionally apply the model to a
+# disposable OpenFGA instance to prove the model boots cleanly + survives a write.
+# Production application against the Mac Mini happens via launchd + the manual
+# scripts/openfga-bootstrap.sh step (Auth_Design.md §10.2 — schema is code-PR-only,
+# no remote write from CI).
+
+jobs:
+  validate:
+    name: Validate FGA DSL
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pull openfga/cli
+        run: docker pull openfga/cli:latest
+
+      - name: fga model validate
+        run: |
+          docker run --rm \
+            -v "$PWD/openfga/bsvibe.fga:/schema/bsvibe.fga:ro" \
+            openfga/cli:latest model validate --file /schema/bsvibe.fga
+
+      - name: fga model transform (DSL → JSON)
+        run: |
+          docker run --rm \
+            -v "$PWD/openfga/bsvibe.fga:/schema/bsvibe.fga:ro" \
+            openfga/cli:latest model transform --file /schema/bsvibe.fga --input-format=fga \
+            > /tmp/model.json
+          jq empty /tmp/model.json
+          test -s /tmp/model.json
+
+  smoke-apply:
+    name: Smoke-apply against disposable OpenFGA
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+
+    services:
+      openfga-postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: openfga
+          POSTGRES_USER: openfga
+          POSTGRES_PASSWORD: ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U openfga -d openfga"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Migrate OpenFGA datastore
+        run: |
+          docker run --rm --network=host \
+            -e OPENFGA_DATASTORE_ENGINE=postgres \
+            -e OPENFGA_DATASTORE_URI="postgres://openfga:ci_password@127.0.0.1:5432/openfga?sslmode=disable" \
+            openfga/openfga:v1.6.2 migrate
+
+      - name: Start OpenFGA (background)
+        run: |
+          docker run -d --name openfga --network=host \
+            -e OPENFGA_DATASTORE_ENGINE=postgres \
+            -e OPENFGA_DATASTORE_URI="postgres://openfga:ci_password@127.0.0.1:5432/openfga?sslmode=disable" \
+            -e OPENFGA_LOG_FORMAT=json \
+            openfga/openfga:v1.6.2 run
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8080/healthz >/dev/null; then
+              echo "OpenFGA is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "OpenFGA failed to start" >&2
+          docker logs openfga >&2 || true
+          exit 1
+
+      - name: Apply bsvibe.fga via openfga-bootstrap.sh
+        env:
+          OPENFGA_API_URL: http://127.0.0.1:8080
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq jq
+          chmod +x scripts/openfga-bootstrap.sh
+          INFRA_DIR="$PWD" scripts/openfga-bootstrap.sh
+
+      - name: Idempotency check (re-run, expect no model write)
+        env:
+          OPENFGA_API_URL: http://127.0.0.1:8080
+        run: |
+          INFRA_DIR="$PWD" scripts/openfga-bootstrap.sh | tee /tmp/run2.log
+          grep -q "schema unchanged" /tmp/run2.log
+
+      - name: Status check
+        env:
+          OPENFGA_API_URL: http://127.0.0.1:8080
+        run: |
+          chmod +x scripts/openfga-status.sh
+          INFRA_DIR="$PWD" scripts/openfga-status.sh
+
+      - name: Stop OpenFGA
+        if: always()
+        run: docker rm -f openfga || true

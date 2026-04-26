@@ -11,6 +11,7 @@
 | BSForge | 8300 | - | 5436 | 6383 | FLOWER_PORT=5555 |
 | BSage | 8400 | 3400 | - | - | - |
 | MetaSummarizer | - | - | - | - | CLI only |
+| OpenFGA | 8765 (HTTP) | - | 5440 | - | GRPC=8766, PLAY=3030 |
 
 ## DevContainer (agent worktree) — +10000 offset
 

@@ -115,6 +115,46 @@ scripts/autodeploy.sh
 Targets: bloasis, BSGateway, BSNexus, bsai, BSForge, BSage (projects with `deploy/docker-compose.yml`).
 Logs: `logs/autodeploy.log`
 
+## OpenFGA (Phase 0 P0.3)
+
+Single-node OpenFGA + dedicated Postgres datastore for BSVibe authorization
+(decision #6 in `BSVibe_Execution_Lockin.md`, schema per `BSVibe_Auth_Design.md` §3).
+
+```bash
+# 1. Configure secrets
+cp openfga/.env.example openfga/.env
+chmod 600 openfga/.env
+# Generate two random secrets:
+#   openssl rand -hex 32   # → OPENFGA_PG_PASSWORD
+#   openssl rand -hex 32   # → OPENFGA_AUTHN_PRESHARED_KEYS
+
+# 2. Bring up the stack (idempotent)
+scripts/openfga-up.sh
+
+# 3. Apply bsvibe.fga schema (idempotent — re-run safe)
+scripts/openfga-bootstrap.sh
+
+# 4. Verify
+scripts/openfga-status.sh
+```
+
+Boot-time auto-start via `launchd/com.blas1n.openfga.plist`:
+```bash
+ln -sf ~/Works/_infra/launchd/com.blas1n.openfga.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.blas1n.openfga.plist
+```
+
+Schema source of truth: `openfga/bsvibe.fga`. CI validates DSL on every PR;
+on `main` push it smoke-applies against a disposable instance
+(`.github/workflows/openfga-schema.yml`). Production application against
+the Mac Mini happens via `scripts/openfga-bootstrap.sh` (no remote write
+from CI — Auth_Design.md §10.2).
+
+Endpoints (loopback only — expose via Caddy if external needed):
+- `http://127.0.0.1:8765` — HTTP API (consumed by `bsvibe-authz` in P0.4)
+- `http://127.0.0.1:8766` — gRPC API
+- `http://127.0.0.1:3030` — Playground / debug UI
+
 ## See Also
 
 - [port-map.md](port-map.md) — detailed port allocation map
