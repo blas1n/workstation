@@ -1,0 +1,108 @@
+# OpenFGA single-node + dedicated Postgres datastore
+#
+# Decision #6 (BSVibe_Execution_Lockin.md): OpenFGA 단일 노드, docker-compose 기반.
+# Auth_Design.md §10.1 reference deployment.
+#
+# Usage:
+#   docker compose -f docker-compose.openfga.yml --env-file openfga/.env up -d
+#   docker compose -f docker-compose.openfga.yml ps
+#   docker compose -f docker-compose.openfga.yml down
+#
+# launchd loads this via scripts/openfga-up.sh (com.blas1n.openfga plist).
+#
+# After first start: scripts/openfga-bootstrap.sh applies bsvibe.fga schema
+# (idempotent — safe to run repeatedly; only applies when checksum differs).
+#
+# Ports
+#   OPENFGA_HTTP_PORT  (default 8765) — HTTP API consumed by bsvibe-authz
+#   OPENFGA_GRPC_PORT  (default 8766) — gRPC API (optional clients)
+#   OPENFGA_PLAY_PORT  (default 3030) — Playground (dev / debugging)
+#   OPENFGA_PG_PORT    (default 5440) — Postgres bound to 127.0.0.1 only
+
+name: openfga
+
+services:
+  openfga-postgres:
+    image: postgres:16-alpine
+    container_name: openfga-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${OPENFGA_PG_DB:-openfga}
+      POSTGRES_USER: ${OPENFGA_PG_USER:-openfga}
+      POSTGRES_PASSWORD: ${OPENFGA_PG_PASSWORD:?OPENFGA_PG_PASSWORD must be set}
+    ports:
+      # Bind to loopback only — Postgres is internal.
+      - "127.0.0.1:${OPENFGA_PG_PORT:-5440}:5432"
+    volumes:
+      - openfga-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${OPENFGA_PG_USER:-openfga} -d ${OPENFGA_PG_DB:-openfga}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - openfga
+
+  openfga-migrate:
+    image: openfga/openfga:${OPENFGA_VERSION:-v1.6.2}
+    container_name: openfga-migrate
+    depends_on:
+      openfga-postgres:
+        condition: service_healthy
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://${OPENFGA_PG_USER:-openfga}:${OPENFGA_PG_PASSWORD}@openfga-postgres:5432/${OPENFGA_PG_DB:-openfga}?sslmode=disable
+    command: migrate
+    restart: "no"
+    networks:
+      - openfga
+
+  openfga:
+    image: openfga/openfga:${OPENFGA_VERSION:-v1.6.2}
+    container_name: openfga
+    depends_on:
+      openfga-postgres:
+        condition: service_healthy
+      openfga-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://${OPENFGA_PG_USER:-openfga}:${OPENFGA_PG_PASSWORD}@openfga-postgres:5432/${OPENFGA_PG_DB:-openfga}?sslmode=disable
+      # Auth: preshared keys (rotate quarterly per Auth_Design.md §10.3).
+      # Empty/unset => no authentication (NOT recommended in production).
+      OPENFGA_AUTHN_METHOD: ${OPENFGA_AUTHN_METHOD:-preshared}
+      OPENFGA_AUTHN_PRESHARED_KEYS: ${OPENFGA_AUTHN_PRESHARED_KEYS:?OPENFGA_AUTHN_PRESHARED_KEYS must be set when AUTHN_METHOD=preshared}
+      OPENFGA_LOG_FORMAT: json
+      OPENFGA_LOG_LEVEL: ${OPENFGA_LOG_LEVEL:-info}
+      OPENFGA_PLAYGROUND_ENABLED: ${OPENFGA_PLAYGROUND_ENABLED:-true}
+      OPENFGA_HTTP_ADDR: 0.0.0.0:8080
+      OPENFGA_GRPC_ADDR: 0.0.0.0:8081
+      OPENFGA_METRICS_ENABLED: "true"
+    command: run
+    ports:
+      # HTTP API — consumed by bsvibe-authz / Caddy reverse proxy upstream.
+      - "127.0.0.1:${OPENFGA_HTTP_PORT:-8765}:8080"
+      # gRPC API — optional, for low-latency clients.
+      - "127.0.0.1:${OPENFGA_GRPC_PORT:-8766}:8081"
+      # Playground — debug UI. Disable via OPENFGA_PLAYGROUND_ENABLED=false in prod
+      # if undesired. Bound to loopback so external exposure requires reverse proxy.
+      - "127.0.0.1:${OPENFGA_PLAY_PORT:-3030}:3000"
+    healthcheck:
+      # OpenFGA exposes /healthz on the HTTP port.
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8080/healthz | grep -q SERVING || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    networks:
+      - openfga
+
+networks:
+  openfga:
+    name: openfga
+    driver: bridge
+
+volumes:
+  openfga-postgres-data:
+    name: openfga-postgres-data

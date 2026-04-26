@@ -1,2 +1,6 @@
 .DS_Store
 logs/
+
+# OpenFGA local secrets and bootstrap state (Phase 0 P0.3).
+openfga/.env
+openfga/.bootstrap.json
