@@ -12,6 +12,17 @@
 | BSage | 8400 | 3400 | - | - | - |
 | MetaSummarizer | - | - | - | - | CLI only |
 
+## Demo (interactive demo stack — +500 offset from prod)
+
+Public demo deployments at `demo-{product}.bsvibe.dev` / `api-demo-{product}.bsvibe.dev`. Per-visitor ephemeral tenants, separate PG, isolated from prod.
+
+| Project | APP_PORT | PG_PORT | REDIS_PORT |
+|---------|----------|---------|-----------|
+| BSGateway | 4500 | 5933 | 6880 |
+| BSNexus | 8600 | 5934 | 6881 |
+| BSupervisor | 9000 | 5937 | 6884 |
+| BSage | 8900 | - | - |
+
 ## DevContainer (agent worktree) — +10000 offset
 
 | Slot | Rule | Example (bloasis) |
