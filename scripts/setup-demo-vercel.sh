@@ -169,6 +169,15 @@ print(json.dumps({'key': '${key}', 'value': '${value}', 'type': 'plain', 'target
   add_env "${env_prefix}BSVIBE_DEMO" "1"
   add_env "${env_prefix}API_URL" "${api_url}"
 
+  # NPM_TOKEN for @bsvibe/* GitHub Packages auth — sourced from ~/.npmrc.
+  # Required so pnpm install can pull @bsvibe/demo + siblings during build.
+  if [ -f "$HOME/.npmrc" ]; then
+    npm_token=$(grep "_authToken" "$HOME/.npmrc" | sed 's|.*_authToken=||' | tr -d '\n')
+    if [ -n "$npm_token" ]; then
+      add_env "NPM_TOKEN" "$npm_token"
+    fi
+  fi
+
   # 3. Domain (idempotent)
   domain_resp=$(vapi POST "/v10/projects/${project_id}/domains" "$(python3 -c "
 import json

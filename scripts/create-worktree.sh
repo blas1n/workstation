@@ -31,11 +31,12 @@ get_base_ports() {
     BSage)          echo "8400 3400 - -" ;;
     MetaSummarizer) echo "- - - -" ;;
     BSupervisor)    echo "8500 3500 5437 6384" ;;
+    bsvibe-python)  echo "- - - -" ;;
     *)              return 1 ;;
   esac
 }
 
-ALL_PROJECTS="bloasis BSGateway BSNexus bsai BSForge BSage MetaSummarizer BSupervisor"
+ALL_PROJECTS="bloasis BSGateway BSNexus bsai BSForge BSage MetaSummarizer BSupervisor bsvibe-python"
 
 # ─── Usage ───────────────────────────────────────────────────────────
 usage() {
