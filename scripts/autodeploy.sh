@@ -5,12 +5,16 @@
 export PATH="/opt/homebrew/bin:$PATH"
 
 PROJECTS=(bloasis BSGateway BSNexus bsai BSForge BSage BSupervisor)
+# Projects with a public demo stack (deploy/docker-compose.demo.yml + .env.demo)
+DEMO_PROJECTS=(BSGateway BSNexus BSage BSupervisor)
 LOG=~/Works/_infra/logs/autodeploy.log
 
 for name in "${PROJECTS[@]}"; do
   BARE=~/Works/${name}/.bare
   WORK=~/Works/${name}/main
   COMPOSE=${WORK}/deploy/docker-compose.yml
+  DEMO_COMPOSE=${WORK}/deploy/docker-compose.demo.yml
+  DEMO_ENV=${WORK}/deploy/.env.demo
 
   [ ! -d "$BARE" ] && continue
 
@@ -29,10 +33,24 @@ for name in "${PROJECTS[@]}"; do
       if [ -f "$COMPOSE" ]; then
         PROJECT_NAME=$(echo "$name" | tr '[:upper:]' '[:lower:]')
         if ! docker-compose -p "$PROJECT_NAME" -f "$COMPOSE" up -d --build >> "$LOG" 2>&1; then
-          echo "$(date) [${name}] Build failed!" >> "$LOG"
+          echo "$(date) [${name}] Prod build failed!" >> "$LOG"
           continue
         fi
       fi
+
+      # Rebuild demo stack alongside prod (only if demo files exist for this project)
+      is_demo_project=false
+      for dp in "${DEMO_PROJECTS[@]}"; do
+        [ "$dp" = "$name" ] && is_demo_project=true && break
+      done
+      if [ "$is_demo_project" = true ] && [ -f "$DEMO_COMPOSE" ] && [ -f "$DEMO_ENV" ]; then
+        DEMO_PROJECT_NAME="$(echo "$name" | tr '[:upper:]' '[:lower:]')-demo"
+        if ! docker-compose -p "$DEMO_PROJECT_NAME" -f "$DEMO_COMPOSE" --env-file "$DEMO_ENV" up -d --build >> "$LOG" 2>&1; then
+          echo "$(date) [${name}] Demo build failed (non-fatal)!" >> "$LOG"
+          # Demo failure is non-fatal — prod kept running
+        fi
+      fi
+
       echo "$(date) [${name}] Done" >> "$LOG"
     else
       echo "$(date) [${name}] Merge failed, skipping rebuild" >> "$LOG"
