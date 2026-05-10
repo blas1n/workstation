@@ -75,24 +75,33 @@ fi
 VOLUMES=$(docker volume ls --filter "label=com.docker.compose.project=${DC_PROJECT}" --format '{{.Name}}' 2>/dev/null || true)
 
 if [ -n "$VOLUMES" ]; then
-  read -p "Delete devcontainer volumes? [y/N] " -n 1 -r
-  echo
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
-    docker volume ls --filter "label=com.docker.compose.project=${DC_PROJECT}" --format '{{.Name}}' | xargs -r docker volume rm
-    echo "  Removed volumes"
-  fi
+  echo "$VOLUMES" | xargs -r docker volume rm >/dev/null 2>&1 || true
+  echo "  Removed $(echo "$VOLUMES" | wc -l | tr -d ' ') volume(s)"
+fi
+
+IMAGES=$(docker images --filter "reference=${DC_PROJECT}-*" --format '{{.ID}}' 2>/dev/null | sort -u || true)
+if [ -n "$IMAGES" ]; then
+  echo "$IMAGES" | xargs -r docker rmi -f >/dev/null 2>&1 || true
+  echo "  Removed $(echo "$IMAGES" | wc -l | tr -d ' ') image(s)"
+fi
+
+NETWORKS=$(docker network ls --filter "label=com.docker.compose.project=${DC_PROJECT}" --format '{{.Name}}' 2>/dev/null || true)
+if [ -n "$NETWORKS" ]; then
+  echo "$NETWORKS" | xargs -r docker network rm >/dev/null 2>&1 || true
+  echo "  Removed $(echo "$NETWORKS" | wc -l | tr -d ' ') network(s)"
 fi
 
 cd "$BARE_DIR"
 git worktree remove "$WT_PATH" --force
 
-# Optionally delete the branch
+# Delete the branch (skip main)
 if [ -n "$BRANCH" ] && [ "$BRANCH" != "main" ]; then
-  read -p "Delete branch '${BRANCH}'? [y/N] " -n 1 -r
-  echo
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
-    git branch -D "$BRANCH" 2>/dev/null && echo "  Branch '${BRANCH}' deleted" || echo "  Branch already gone"
-  fi
+  git branch -D "$BRANCH" 2>/dev/null && echo "  Branch '${BRANCH}' deleted" || echo "  Branch already gone"
+fi
+
+if command -v colima >/dev/null 2>&1 && colima status 2>&1 | grep -q running; then
+  colima ssh -- sudo fstrim -av >/dev/null 2>&1 || true
+  echo "  Disk blocks returned to host (fstrim)"
 fi
 
 echo "Done. Slot ${SLOT} is now free."
