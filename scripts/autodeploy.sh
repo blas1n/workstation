@@ -34,6 +34,14 @@ for name in "${PROJECTS[@]}"; do
   fi
 
   git -C "$BARE" fetch origin main --quiet 2>/dev/null
+  # Also fetch inside $WORK. When $WORK is a linked worktree of $BARE this
+  # is redundant (shared object store + refs). But when $WORK is a
+  # *standalone clone* — its own .git, its own origin remote — the $BARE
+  # fetch never advances $WORK's refs/remotes/origin/main, so the
+  # ``git -C $WORK merge origin/main --ff-only`` below resolves a stale
+  # ref, reports "Already up to date", and the poller rebuilds stale code
+  # every cycle forever. Fetching where we merge fixes both layouts.
+  git -C "$WORK" fetch origin main --quiet 2>/dev/null
   LOCAL=$(git -C "$WORK" rev-parse HEAD 2>/dev/null)
   REMOTE=$(git -C "$BARE" rev-parse origin/main 2>/dev/null)
   DEPLOYED=$(cat "$DEPLOYED_FILE" 2>/dev/null)
@@ -67,7 +75,16 @@ for name in "${PROJECTS[@]}"; do
 
   if [ -f "$COMPOSE" ]; then
     PROJECT_NAME=$(echo "$name" | tr '[:upper:]' '[:lower:]')
-    if ! docker-compose -p "$PROJECT_NAME" -f "$COMPOSE" up -d --build >> "$LOG" 2>&1; then
+    # ``--force-recreate`` (Round 4 Phase 8 dogfood 2026-05-11): without
+    # this, ``up -d --build`` rebuilds the image but compose silently
+    # reuses an existing container when the image ID hash collides with
+    # the previous build (cache-hit on layers + identical context →
+    # identical image SHA → no recreate). Symptom: ``.deployed`` file
+    # bumped to the new commit, but the container keeps running the old
+    # code. Force-recreate is safe here because we only enter this
+    # block when needs_merge or needs_build was true — meaning we
+    # actually want to flip to the new code.
+    if ! docker-compose -p "$PROJECT_NAME" -f "$COMPOSE" up -d --build --force-recreate >> "$LOG" 2>&1; then
       echo "$(date) [${name}] Prod build failed!" >> "$LOG"
       continue
     fi
@@ -80,7 +97,7 @@ for name in "${PROJECTS[@]}"; do
   done
   if [ "$is_demo_project" = true ] && [ -f "$DEMO_COMPOSE" ] && [ -f "$DEMO_ENV" ]; then
     DEMO_PROJECT_NAME="$(echo "$name" | tr '[:upper:]' '[:lower:]')-demo"
-    if ! docker-compose -p "$DEMO_PROJECT_NAME" -f "$DEMO_COMPOSE" --env-file "$DEMO_ENV" up -d --build >> "$LOG" 2>&1; then
+    if ! docker-compose -p "$DEMO_PROJECT_NAME" -f "$DEMO_COMPOSE" --env-file "$DEMO_ENV" up -d --build --force-recreate >> "$LOG" 2>&1; then
       echo "$(date) [${name}] Demo build failed (non-fatal)!" >> "$LOG"
       # Demo failure is non-fatal — prod kept running
     fi
