@@ -63,6 +63,30 @@ for name in "${PROJECTS[@]}"; do
     continue
   fi
 
+  # G-A — do not recreate the BSNexus app container while a work phase
+  # is in flight: a `docker-compose up --force-recreate` kills the
+  # in-process qwen3 work phase and orphans its RunAttempt. Defer the
+  # deploy until no RunAttempt is `running`. Capped at 60 min so a
+  # genuine zombie (a `running` row whose process already died) can't
+  # block deploys forever — past the cap we deploy anyway and the
+  # app's startup reaper (reap_orphaned_run_attempts) cleans it up.
+  if [ "$name" = "BSNexus" ]; then
+    DEFER_FILE=$LOG_DIR/${name}.deploy-deferred-since
+    running=$(docker exec bsnexus-postgres psql -U bsnexus -d bsnexus -tAc \
+      "select count(*) from run_attempts where status='running'" 2>/dev/null | tr -d '[:space:]')
+    if [ -n "$running" ] && [ "$running" -gt 0 ] 2>/dev/null; then
+      now=$(date +%s)
+      [ -f "$DEFER_FILE" ] || echo "$now" > "$DEFER_FILE"
+      since=$(cat "$DEFER_FILE" 2>/dev/null || echo "$now")
+      if [ $((now - since)) -lt 3600 ]; then
+        echo "$(date) [${name}] Work phase in flight (${running} running) — deferring deploy" >> "$LOG"
+        continue
+      fi
+      echo "$(date) [${name}] Deferral cap reached — deploying anyway (startup reaper will clean zombies)" >> "$LOG"
+    fi
+    rm -f "$DEFER_FILE"
+  fi
+
   if [ "$needs_merge" = true ]; then
     echo "$(date) [${name}] Deploying ${REMOTE:0:7}..." >> "$LOG"
     if ! git -C "$WORK" merge origin/main --ff-only 2>> "$LOG"; then
@@ -108,3 +132,60 @@ for name in "${PROJECTS[@]}"; do
   echo "$REMOTE" > "$DEPLOYED_FILE"
   echo "$(date) [${name}] Done" >> "$LOG"
 done
+
+# --- bsvibe-app (separate block — distinct compose layout) ---
+# The legacy projects above use `docker-compose -f deploy/docker-compose.yml`;
+# bsvibe-app uses `docker compose -f deploy/compose.yaml -f deploy/compose.prod.yaml
+# --env-file deploy/.env.prod` with project `bsvibe-prod`. PWA prod is on Vercel
+# (auto-deploys on main merge), so we only rebuild backend + worker here.
+# Postgres + Redis are stateful — don't touch.
+{
+  name="bsvibe-app"
+  BARE=~/Works/${name}/.bare
+  WORK=~/Works/${name}/main
+  COMPOSE_BASE=${WORK}/deploy/compose.yaml
+  COMPOSE_PROD=${WORK}/deploy/compose.prod.yaml
+  ENV_PROD=${WORK}/deploy/.env.prod
+  DEPLOYED_FILE=$LOG_DIR/${name}.deployed
+
+  if [ -d "$BARE" ] && [ -f "$COMPOSE_BASE" ] && [ -f "$COMPOSE_PROD" ] && [ -f "$ENV_PROD" ]; then
+    if ! git -C "$BARE" config --get remote.origin.fetch &>/dev/null; then
+      git -C "$BARE" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+    fi
+
+    git -C "$BARE" fetch origin main --quiet 2>/dev/null
+    git -C "$WORK" fetch origin main --quiet 2>/dev/null
+    LOCAL=$(git -C "$WORK" rev-parse HEAD 2>/dev/null)
+    REMOTE=$(git -C "$BARE" rev-parse origin/main 2>/dev/null)
+    DEPLOYED=$(cat "$DEPLOYED_FILE" 2>/dev/null)
+
+    needs_merge=false
+    needs_build=false
+    [ -n "$REMOTE" ] && [ "$LOCAL" != "$REMOTE" ] && needs_merge=true
+    [ -n "$REMOTE" ] && [ "$DEPLOYED" != "$REMOTE" ] && needs_build=true
+
+    if [ -n "$REMOTE" ] && { [ "$needs_merge" = true ] || [ "$needs_build" = true ]; }; then
+      proceed=true
+      if [ "$needs_merge" = true ]; then
+        echo "$(date) [${name}] Deploying ${REMOTE:0:7}..." >> "$LOG"
+        if ! git -C "$WORK" merge origin/main --ff-only 2>> "$LOG"; then
+          echo "$(date) [${name}] Merge failed, skipping rebuild" >> "$LOG"
+          proceed=false
+        fi
+      else
+        echo "$(date) [${name}] Stale image (deployed=${DEPLOYED:0:7} vs source=${REMOTE:0:7}) — rebuilding" >> "$LOG"
+      fi
+
+      if [ "$proceed" = true ]; then
+        if docker compose -p bsvibe-prod \
+             -f "$COMPOSE_BASE" -f "$COMPOSE_PROD" --env-file "$ENV_PROD" \
+             up -d --build --force-recreate backend worker >> "$LOG" 2>&1; then
+          echo "$REMOTE" > "$DEPLOYED_FILE"
+          echo "$(date) [${name}] Done" >> "$LOG"
+        else
+          echo "$(date) [${name}] Prod build failed!" >> "$LOG"
+        fi
+      fi
+    fi
+  fi
+}
