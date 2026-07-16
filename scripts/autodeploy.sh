@@ -4,6 +4,18 @@
 
 export PATH="/opt/homebrew/bin:$PATH"
 
+# Pin the docker context. The CLI's *current* context is global user state — any
+# `colima start <other-profile>` (or a stray `docker context use`) silently
+# repoints every docker/compose call in this script at that VM. It does not
+# fail: compose happily BUILDS the images and STARTS a full duplicate stack —
+# its own postgres, its own redis, empty — inside the wrong VM, writes "Done",
+# and leaves the real containers untouched on their old code. Both VMs then
+# publish the same host ports, so a restart can hand live traffic to the empty
+# copy (2026-07-13: the current context had drifted to `colima-palworld`; the
+# bsvibe-app fix built + "deployed" into that VM three cycles running while prod
+# kept serving 14-hour-old code).
+export DOCKER_CONTEXT=colima
+
 PROJECTS=(bloasis BSGateway BSNexus bsai BSForge BSage BSupervisor)
 # Projects with a public demo stack (deploy/docker-compose.demo.yml + .env.demo)
 DEMO_PROJECTS=(BSGateway BSNexus BSage BSupervisor)
@@ -159,6 +171,25 @@ done
     REMOTE=$(git -C "$BARE" rev-parse origin/main 2>/dev/null)
     DEPLOYED=$(cat "$DEPLOYED_FILE" 2>/dev/null)
 
+    # Deploy scope. The cheap path force-recreates only backend+worker (same-tag
+    # app images that `up -d --build` alone would NOT recreate). Infra services
+    # (sandbox-dind/redis/postgres) are not depends_on of those, so a change to
+    # their compose/Dockerfile would otherwise never deploy. When THIS deploy
+    # touches anything under deploy/ (compose, Dockerfile.sandbox-dind, ...),
+    # recreate the WHOLE stack so infra changes land regardless of image tag;
+    # otherwise stay cheap and never needlessly restart sandbox-dind (which would
+    # kill in-flight verify runs) / postgres / redis.
+    # The runtime stack recreated on an infra change — pwa is intentionally
+    # EXCLUDED (Vercel-fronted; recreating it here would couple the deploy to a
+    # pwa build and needlessly rebuild/restart it).
+    RUNTIME_STACK="backend worker sandbox-dind redis postgres"
+    RECREATE_SVCS="backend worker"
+    if [ -z "$DEPLOYED" ] || ! git -C "$BARE" cat-file -e "${DEPLOYED}^{commit}" 2>/dev/null; then
+      RECREATE_SVCS="$RUNTIME_STACK"   # unknown / first deploy -> recreate the runtime stack (safe)
+    elif [ -n "$(git -C "$BARE" diff --name-only "$DEPLOYED" "$REMOTE" -- deploy/ 2>/dev/null)" ]; then
+      RECREATE_SVCS="$RUNTIME_STACK"   # deploy/ (infra) changed -> recreate the runtime stack
+    fi
+
     needs_merge=false
     needs_build=false
     [ -n "$REMOTE" ] && [ "$LOCAL" != "$REMOTE" ] && needs_merge=true
@@ -177,9 +208,11 @@ done
       fi
 
       if [ "$proceed" = true ]; then
+        [ -z "$RECREATE_SVCS" ] && echo "$(date) [${name}] deploy/ changed — recreating full stack" >> "$LOG"
+        # shellcheck disable=SC2086 -- intentional word-split: empty RECREATE_SVCS = all services
         if docker compose -p bsvibe-prod \
              -f "$COMPOSE_BASE" -f "$COMPOSE_PROD" --env-file "$ENV_PROD" \
-             up -d --build --force-recreate backend worker >> "$LOG" 2>&1; then
+             up -d --build --force-recreate $RECREATE_SVCS >> "$LOG" 2>&1; then
           echo "$REMOTE" > "$DEPLOYED_FILE"
           echo "$(date) [${name}] Done" >> "$LOG"
         else
