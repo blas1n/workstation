@@ -16,6 +16,10 @@
 
 set -euo pipefail
 
+# launchd runs with a minimal PATH that excludes Homebrew — without this, `docker`
+# (/opt/homebrew/bin) is not found and the script mis-reports the DB as down.
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
 BACKUP_DIR="${1:-$HOME/backups/bsvibe}"
 RETENTION_DAYS="${BSVIBE_BACKUP_RETENTION_DAYS:-14}"
 # Minimum plausible gzipped dump size (bytes). The real dump is ~18MB gzipped;
