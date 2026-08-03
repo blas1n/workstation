@@ -85,17 +85,32 @@ find "$BACKUP_DIR" -name 'bsvibe_*.sql.gz' -type f -mtime "+${RETENTION_DAYS}" -
 KEPT="$(find "$BACKUP_DIR" -name 'bsvibe_*.sql.gz' -type f | wc -l | tr -d '[:space:]')"
 echo "  Retained $KEPT dump(s) (last ${RETENTION_DAYS} days)."
 
-# 5. Optional off-box copy (the Mac Mini disk is itself a SPOF). Set
-# BSVIBE_BACKUP_OFFBOX_DEST=user@host:/path or an rsync target to enable.
-if [ -n "${BSVIBE_BACKUP_OFFBOX_DEST:-}" ]; then
-  echo "  Off-box copy → $BSVIBE_BACKUP_OFFBOX_DEST ..."
-  if ! rsync -a "$BACKUP_FILE" "$BSVIBE_BACKUP_OFFBOX_DEST/" 2>&1; then
-    fail "off-box rsync to $BSVIBE_BACKUP_OFFBOX_DEST failed (local dump is OK)"
+# 5. Off-box copy to Cloudflare R2 (the Mac Mini disk is itself a SPOF).
+# Uses the rclone `r2` remote (~/.config/rclone/rclone.conf, mode 0600).
+# The R2 API token is IP-restricted to the host's IPv4 egress AND bucket-scoped,
+# so we must: (a) force IPv4 — rclone otherwise prefers the endpoint's IPv6,
+# whose source IP is NOT allow-listed → 403; (b) --s3-no-check-bucket to skip the
+# CreateBucket/HeadBucket/List ops a bucket-scoped token can't perform.
+R2_DEST="${BSVIBE_BACKUP_R2_DEST:-r2:bsvibe-backups}"
+if command -v rclone >/dev/null 2>&1 && rclone listremotes 2>/dev/null | grep -q "^${R2_DEST%%:*}:"; then
+  BIND_V4="$(ipconfig getifaddr "$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')" 2>/dev/null || true)"
+  BIND_ARG=""
+  [ -n "$BIND_V4" ] && BIND_ARG="--bind $BIND_V4"
+  echo "  Off-box → ${R2_DEST}/$(basename "$BACKUP_FILE") (IPv4 ${BIND_V4:-auto}) ..."
+  # shellcheck disable=SC2086
+  if rclone copyto "$BACKUP_FILE" "${R2_DEST}/$(basename "$BACKUP_FILE")" \
+      $BIND_ARG --s3-no-check-bucket --retries 3 --low-level-retries 5 --timeout 180s \
+      2>"$BACKUP_DIR/.r2.err"; then
+    echo "  Off-box R2 copy OK."
+  else
+    head -c 400 "$BACKUP_DIR/.r2.err" >&2 || true
+    fail "off-box R2 upload failed (local dump is OK)"
   fi
-  echo "  Off-box copy OK."
 else
-  echo "  NOTE: no off-box destination set (BSVIBE_BACKUP_OFFBOX_DEST) — dump lives only on this Mac Mini disk (a SPOF). Set it to protect against disk failure."
+  echo "  NOTE: rclone 'r2' remote not configured — off-box copy skipped (dump lives only on this Mac Mini disk, a SPOF)."
 fi
+# R2 retention: the bucket-scoped token cannot List/Delete, so old objects are
+# pruned by an R2 bucket lifecycle rule (set in the Cloudflare dashboard), not here.
 
 # 6. Stamp success (watchdog reads this mtime for a >24h-stale alert).
 date -u +%Y-%m-%dT%H:%M:%SZ > "$SUCCESS_MARKER"
