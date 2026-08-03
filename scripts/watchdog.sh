@@ -27,6 +27,14 @@ BACKUP_STALE_S=$((26 * 3600))     # daily 03:00 backup; alert if >26h old
 EXEC_HB_STALE_S=180               # executor should heartbeat well within 120s
 RUN_WEDGE_S=$((2 * 3600))         # a run stuck running/open past the 2h lease
 REALERT_S=$((30 * 60))            # re-send an unchanged breach at most every 30min
+# Disk — this Mac Mini runs BOTH prod AND dev; a full disk not only stops prod
+# but leaves no room to even fix it (unrecoverable brick). Alert EARLY.
+# NOTE: check $HOME (the APFS DATA volume where docker/backups/Works live), NOT
+# "/" — on macOS "/" is the tiny read-only System volume and lies about capacity.
+DISK_VOL="$HOME"
+DISK_FREE_WARN_GB="${BSVIBE_DISK_FREE_WARN_GB:-40}"  # absolute free GB → warn
+DISK_FREE_CRIT_GB="${BSVIBE_DISK_FREE_CRIT_GB:-20}"  # absolute free GB → critical
+RUNS_DIR_WARN_GB="${BSVIBE_RUNS_DIR_WARN_GB:-30}"    # /app/var/runs scratch growth
 
 [ -f "$ENV_FILE" ] || { echo "no $ENV_FILE — cannot alert"; exit 1; }
 set -a; . "$ENV_FILE"; set +a
@@ -65,6 +73,27 @@ fi
 for c in bsvibe-prod-backend-1 bsvibe-prod-worker-1; do
   docker inspect -f '{{.State.Running}}' "$c" 2>/dev/null | grep -q true || add "📦 컨테이너 다운: $c"
 done
+
+# 5. Host disk (the dev+prod machine). Alert on ABSOLUTE free space on the DATA
+# volume — a full disk can't even be fixed. 1K blocks → GB.
+DISK_FREE_KB=$(df -Pk "$DISK_VOL" 2>/dev/null | awk 'NR==2{print $4}')
+if [ -n "$DISK_FREE_KB" ]; then
+  DISK_FREE_GB=$(( DISK_FREE_KB / 1024 / 1024 ))
+  if [ "$DISK_FREE_GB" -le "$DISK_FREE_CRIT_GB" ]; then
+    add "💽 디스크 여유 ${DISK_FREE_GB}GB만 남음 — 🔴위험, 즉시 정리 (풀 시 prod정지+복구불능 브릭)"
+  elif [ "$DISK_FREE_GB" -le "$DISK_FREE_WARN_GB" ]; then
+    add "💽 디스크 여유 ${DISK_FREE_GB}GB — 정리 권장 (dev+prod 겸용 머신)"
+  fi
+fi
+
+# 6. Run-scratch growth — /app/var/runs (per-run clones/worktrees) should be
+# ephemeral; unbounded growth means the terminal-cleanup isn't reclaiming it.
+if docker inspect -f '{{.State.Running}}' bsvibe-prod-backend-1 2>/dev/null | grep -q true; then
+  runs_kb=$(docker exec bsvibe-prod-backend-1 sh -c "du -sk /app/var/runs 2>/dev/null | cut -f1" 2>/dev/null)
+  runs_kb=${runs_kb:-0}
+  runs_gb=$(( runs_kb / 1024 / 1024 ))
+  [ "$runs_gb" -ge "$RUNS_DIR_WARN_GB" ] && add "🧹 run 작업공간 /app/var/runs = ${runs_gb}GB — terminal 정리가 안 되고 쌓이는 중"
+fi
 
 # --- debounce + notify ---
 sig=$(printf '%b' "$breaches" | sort | md5 2>/dev/null || printf '%b' "$breaches" | md5sum | cut -d' ' -f1)

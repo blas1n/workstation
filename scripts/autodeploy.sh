@@ -197,6 +197,36 @@ done
 
     if [ -n "$REMOTE" ] && { [ "$needs_merge" = true ] || [ "$needs_build" = true ]; }; then
       proceed=true
+      # Dogfood self-disruption guard: bsvibe-app IS the platform, so a PR merged
+      # to its OWN main (e.g. BSVibe auto-merging a dogfood change) triggers THIS
+      # rebuild — which force-recreates backend+worker and drops the backend MCP
+      # server mid-run, so any of BSVibe's OWN in-flight executor runs lose their
+      # tools and WEDGE (observed 2026-07-30: a conflict re-drive died on
+      # claude_code_unsanctioned_tools when autodeploy rebuilt under it). Defer the
+      # rebuild while an executor run is running/open. Capped at 30 min so a zombie
+      # 'running' row (process already dead) can't block deploys forever — past the
+      # cap we rebuild and the app's stale-claim reaper cleans it up.
+      DEFER_FILE=$LOG_DIR/${name}.deploy-deferred-since
+      # Only ACTIVELY-progressing runs count — a run wedged/zombied at 'running'
+      # (updated_at stale) must NOT block deploys forever (there are known
+      # zombie-'running' rows post-delivery). 3-min freshness = an in-progress
+      # executor turn; the app reaper cleans the zombies.
+      running=$(docker exec bsvibe-prod-postgres-1 psql -U bsvibe -d bsvibe -tAc \
+        "select count(*) from execution_runs where status in ('running','open') and updated_at > now() - interval '3 minutes'" 2>/dev/null | tr -d '[:space:]')
+      if [ -n "$running" ] && [ "$running" -gt 0 ] 2>/dev/null; then
+        now=$(date +%s)
+        [ -f "$DEFER_FILE" ] || echo "$now" > "$DEFER_FILE"
+        since=$(cat "$DEFER_FILE" 2>/dev/null || echo "$now")
+        if [ $((now - since)) -lt 1800 ]; then
+          echo "$(date) [${name}] ${running} executor run(s) in flight — deferring rebuild (self-disruption guard)" >> "$LOG"
+          proceed=false
+        else
+          echo "$(date) [${name}] Deferral cap (30m) reached — rebuilding anyway (reaper cleans wedged runs)" >> "$LOG"
+          rm -f "$DEFER_FILE"
+        fi
+      else
+        rm -f "$DEFER_FILE"
+      fi
       if [ "$needs_merge" = true ]; then
         echo "$(date) [${name}] Deploying ${REMOTE:0:7}..." >> "$LOG"
         if ! git -C "$WORK" merge origin/main --ff-only 2>> "$LOG"; then
@@ -215,6 +245,12 @@ done
              up -d --build --force-recreate $RECREATE_SVCS >> "$LOG" 2>&1; then
           echo "$REMOTE" > "$DEPLOYED_FILE"
           echo "$(date) [${name}] Done" >> "$LOG"
+          # Reclaim the previous (now-dangling) image + aged build cache so
+          # rebuilds don't accumulate — the 451GB image pileup that nearly filled
+          # the dev+prod disk (2026-08-03). Dangling-only (NOT -a) so base images
+          # for the next build survive; running containers keep their images.
+          docker image prune -f >> "$LOG" 2>&1 || true
+          docker builder prune -f --filter 'until=168h' >> "$LOG" 2>&1 || true
         else
           echo "$(date) [${name}] Prod build failed!" >> "$LOG"
         fi
