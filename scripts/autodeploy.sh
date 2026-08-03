@@ -239,6 +239,18 @@ done
 
       if [ "$proceed" = true ]; then
         [ -z "$RECREATE_SVCS" ] && echo "$(date) [${name}] deploy/ changed — recreating full stack" >> "$LOG"
+        # sandbox-dind carries a FIXED `container_name`, and `--force-recreate`
+        # renames the old container to `<id>_bsvibe-sandbox-dind` before creating
+        # the replacement. If a previous run died between those two steps, the
+        # leftover still holds (or half-holds) the name and every later recreate
+        # fails with "Conflict. The container name is already in use" — taking
+        # backend+worker DOWN with it (observed 2026-08-03: a deploy/ change hit
+        # this and left the whole stack in `Created`). Sweep the leftovers first;
+        # the live container is untouched because its name has no `_` prefix.
+        for stale in $(docker ps -aq --filter 'name=_bsvibe-sandbox-dind' 2>/dev/null); do
+          echo "$(date) [${name}] removing stale sandbox-dind leftover $stale" >> "$LOG"
+          docker rm -f "$stale" >> "$LOG" 2>&1 || true
+        done
         # shellcheck disable=SC2086 -- intentional word-split: empty RECREATE_SVCS = all services
         if docker compose -p bsvibe-prod \
              -f "$COMPOSE_BASE" -f "$COMPOSE_PROD" --env-file "$ENV_PROD" \

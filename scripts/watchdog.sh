@@ -35,6 +35,7 @@ DISK_VOL="$HOME"
 DISK_FREE_WARN_GB="${BSVIBE_DISK_FREE_WARN_GB:-40}"  # absolute free GB → warn
 DISK_FREE_CRIT_GB="${BSVIBE_DISK_FREE_CRIT_GB:-20}"  # absolute free GB → critical
 RUNS_DIR_WARN_GB="${BSVIBE_RUNS_DIR_WARN_GB:-30}"    # /app/var/runs scratch growth
+PRODUCTS_DIR_WARN_GB="${BSVIBE_PRODUCTS_DIR_WARN_GB:-20}"  # /app/var/products (should stay bounded to ACTIVE products)
 
 [ -f "$ENV_FILE" ] || { echo "no $ENV_FILE — cannot alert"; exit 1; }
 set -a; . "$ENV_FILE"; set +a
@@ -93,6 +94,23 @@ if docker inspect -f '{{.State.Running}}' bsvibe-prod-backend-1 2>/dev/null | gr
   runs_kb=${runs_kb:-0}
   runs_gb=$(( runs_kb / 1024 / 1024 ))
   [ "$runs_gb" -ge "$RUNS_DIR_WARN_GB" ] && add "🧹 run 작업공간 /app/var/runs = ${runs_gb}GB — terminal 정리가 안 되고 쌓이는 중"
+fi
+
+# 7. Product durability — a product whose repo is on disk but whose newest
+# state never reached the bundle store is NOT durable, and (unlike a missing
+# backup) nothing else would ever surface it. Two signals:
+#   a) an unresolved publish conflict → a pending merge_conflict_review Decision
+#   b) var/products growing → repos are not being reclaimed (publishes failing)
+if docker inspect -f '{{.State.Running}}' "$PG" 2>/dev/null | grep -q true; then
+  conflicts=$(_psql "select count(*) from decisions where status='pending' and decision='merge_conflict_review' and payload->>'reason'='product_bundle_publish_conflict'")
+  conflicts=${conflicts:-0}
+  [ "$conflicts" -gt 0 ] && add "📦 제품 ${conflicts}건이 원격 사본과 충돌해 발행 못 함 — 해결 전까지 백업 안 됨 (/brief 에서 확인)"
+fi
+if docker inspect -f '{{.State.Running}}' bsvibe-prod-backend-1 2>/dev/null | grep -q true; then
+  prod_kb=$(docker exec bsvibe-prod-backend-1 sh -c "du -sk /app/var/products 2>/dev/null | cut -f1" 2>/dev/null)
+  prod_kb=${prod_kb:-0}
+  prod_gb=$(( prod_kb / 1024 / 1024 ))
+  [ "$prod_gb" -ge "$PRODUCTS_DIR_WARN_GB" ] && add "📦 제품 저장소 /app/var/products = ${prod_gb}GB — 유휴 제품 회수가 안 되는 중(발행 실패 의심)"
 fi
 
 # --- debounce + notify ---
