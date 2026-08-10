@@ -251,6 +251,14 @@ done
           echo "$(date) [${name}] removing stale sandbox-dind leftover $stale" >> "$LOG"
           docker rm -f "$stale" >> "$LOG" 2>&1 || true
         done
+        # What is actually being deployed, surfaced at /api/health -> git_sha.
+        # compose.prod.yaml reads `${GIT_SHA:-prod}`; nobody ever exported it, so
+        # the endpoint reported the literal "prod" forever and there was no way
+        # to ask "is what merged what is running?". That question matters: on
+        # 2026-08-10 this poller stopped firing for 2.5h and a merged+CI-green PR
+        # simply never deployed, with nothing anywhere to show the drift.
+        GIT_SHA=$(git -C "$WORK" rev-parse --short HEAD 2>/dev/null || echo prod)
+        export GIT_SHA
         # shellcheck disable=SC2086 -- intentional word-split: empty RECREATE_SVCS = all services
         if docker compose -p bsvibe-prod \
              -f "$COMPOSE_BASE" -f "$COMPOSE_PROD" --env-file "$ENV_PROD" \
