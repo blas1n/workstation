@@ -17,6 +17,16 @@
 set -uo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
+# Pin the docker context — the same hazard autodeploy.sh guards against. The
+# CLI's current context is global user state, so any `colima start
+# <other-profile>` repoints every docker call here at a VM that has no bsvibe
+# containers. This watchdog then reads "not found" as "down" and pages that
+# postgres, backend and worker are all dead while production is perfectly
+# healthy. A monitor that cries wolf is worse than none: the next real outage
+# reads like more noise. (2026-08-09: the context had drifted to
+# colima-palworld and this fired every 2 minutes for hours.)
+export DOCKER_CONTEXT=colima
+
 ENV_FILE="$HOME/.bsvibe/watchdog.env"
 STATE_FILE="$HOME/.bsvibe/watchdog.state"
 BACKUP_MARKER="$HOME/backups/bsvibe/.last-success"
@@ -64,8 +74,21 @@ else
   hb=${hb:-999999}
   [ "$hb" -gt "$EXEC_HB_STALE_S" ] && add "🤖 라이브 executor 없음 — 최근 heartbeat ${hb}s 전 (work 단계 stall)"
 
-  # 4. Wedged runs
-  wedged=$(_psql "select count(*) from execution_runs where status in ('running','open') and updated_at < now() - interval '${RUN_WEDGE_S} seconds'")
+  # 4. Wedged runs — EXCLUDING runs that are waiting on the founder.
+  #
+  # A run paused on a Decision is deliberately parked in RUNNING: drive_once
+  # only picks up OPEN, so RUNNING is how the loop is told "not yours right now"
+  # (build_merge_watch_conflict_escalate, checkpoint_resolution). That parking is
+  # correct and can last as long as the founder takes to answer — which means
+  # this check was turning every unanswered question into a production incident
+  # 2h later, re-alerting every 30min. Observed 2026-08-12: an escalated merge
+  # conflict paged as "wedge 의심" while the queue item sat waiting, exactly as
+  # designed, for a person who was being told their product was broken.
+  #
+  # A pending Decision is the server's own record that the wait is intentional,
+  # so it is the honest discriminator. A run stuck with NO pending Decision is
+  # still a wedge and still alerts.
+  wedged=$(_psql "select count(*) from execution_runs r where r.status in ('running','open') and r.updated_at < now() - interval '${RUN_WEDGE_S} seconds' and not exists (select 1 from execution_decisions d where d.run_id = r.id and d.status = 'pending')")
   wedged=${wedged:-0}
   [ "$wedged" -gt 0 ] && add "⚙️ run ${wedged}건이 2h+ running/open에 끼임 (wedge 의심)"
 fi
