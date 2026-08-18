@@ -203,25 +203,42 @@ done
       # server mid-run, so any of BSVibe's OWN in-flight executor runs lose their
       # tools and WEDGE (observed 2026-07-30: a conflict re-drive died on
       # claude_code_unsanctioned_tools when autodeploy rebuilt under it). Defer the
-      # rebuild while an executor run is running/open. Capped at 30 min so a zombie
-      # 'running' row (process already dead) can't block deploys forever — past the
-      # cap we rebuild and the app's stale-claim reaper cleans it up.
+      # rebuild while an executor run's agent loop is ALIVE.
+      #
+      # "Alive" is the APP'S definition, not a guess — see scripts/lib/run_liveness.sh
+      # and tests/test_run_liveness.sh. The earlier "updated_at within 3 minutes"
+      # rule was wrong in BOTH directions and cost a live run on 2026-08-18: run
+      # abe9e2b9 ran its own declared `uv run pytest -ra` (353 s) and left the DB
+      # untouched for 8m39s, so this guard logged "in flight" at 14:48:57 and then
+      # force-recreated backend+worker under that same run at 14:51:01. It also
+      # protected OPEN rows that nothing is driving, needlessly blocking deploys.
       DEFER_FILE=$LOG_DIR/${name}.deploy-deferred-since
-      # Only ACTIVELY-progressing runs count — a run wedged/zombied at 'running'
-      # (updated_at stale) must NOT block deploys forever (there are known
-      # zombie-'running' rows post-delivery). 3-min freshness = an in-progress
-      # executor turn; the app reaper cleans the zombies.
+      # Lease = 2 x the app's executor turn cap (agent_worker._stale_claim_lease_s).
+      # Past it the run belongs to the app's stale-claim reaper, not to this guard,
+      # so the query self-expires and a zombie claim can never block deploys forever.
+      turn_cap_s=$(docker exec bsvibe-prod-backend-1 printenv BSVIBE_EXECUTOR_TASK_TIMEOUT_S 2>/dev/null | tr -d '[:space:]')
+      [ -n "$turn_cap_s" ] || turn_cap_s=3600
+      lease_s=$(( ${turn_cap_s%.*} * 2 ))
+      # The drive loop lives IN the worker container, so a claim stamped before
+      # that container's CURRENT start is orphaned — no loop can still hold it.
+      # Without this, one crashed run blocks every deploy for the whole lease.
+      loop_started=$(docker inspect -f '{{.State.StartedAt}}' bsvibe-prod-worker-1 2>/dev/null | tr -d '[:space:]')
+      # shellcheck source=lib/run_liveness.sh
+      . "$(dirname "$0")/lib/run_liveness.sh"
       running=$(docker exec bsvibe-prod-postgres-1 psql -U bsvibe -d bsvibe -tAc \
-        "select count(*) from execution_runs where status in ('running','open') and updated_at > now() - interval '3 minutes'" 2>/dev/null | tr -d '[:space:]')
+        "$(run_liveness_sql "$lease_s" "$loop_started")" 2>/dev/null | tr -d '[:space:]')
+      # Safety cap ABOVE the lease: the query already self-expires, so this only
+      # catches a state we did not foresee (e.g. a claim being refreshed forever).
+      defer_cap_s=$(( lease_s + 900 ))
       if [ -n "$running" ] && [ "$running" -gt 0 ] 2>/dev/null; then
         now=$(date +%s)
         [ -f "$DEFER_FILE" ] || echo "$now" > "$DEFER_FILE"
         since=$(cat "$DEFER_FILE" 2>/dev/null || echo "$now")
-        if [ $((now - since)) -lt 1800 ]; then
+        if [ $((now - since)) -lt "$defer_cap_s" ]; then
           echo "$(date) [${name}] ${running} executor run(s) in flight — deferring rebuild (self-disruption guard)" >> "$LOG"
           proceed=false
         else
-          echo "$(date) [${name}] Deferral cap (30m) reached — rebuilding anyway (reaper cleans wedged runs)" >> "$LOG"
+          echo "$(date) [${name}] Deferral cap ($((defer_cap_s/60))m) reached — rebuilding anyway (reaper cleans wedged runs)" >> "$LOG"
           rm -f "$DEFER_FILE"
         fi
       else
