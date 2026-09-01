@@ -30,6 +30,13 @@ LOG=$LOG_DIR/autodeploy.log
 # is skipped, even when the running container is older than LOCAL.
 mkdir -p "$LOG_DIR"
 
+# 배포 ref 가드 — origin/main 만 배포한다. ``$WORK`` 는 사람이 매일 쓰는 작업
+# 디렉터리와 같은 경로라, 거기서 브랜치를 파면 미머지 코드가 prod 로 나갔다
+# (2026-09-01, 11분간 2분마다). ``merge --ff-only`` 는 이걸 못 막는다 — 앞서 있는
+# 브랜치에 대해 언제나 성공한다. tests/test_deploy_ref_guard.sh 가 그 사실을 고정한다.
+# shellcheck source=lib/deploy_ref_guard.sh
+. "$(dirname "$0")/lib/deploy_ref_guard.sh"
+
 for name in "${PROJECTS[@]}"; do
   BARE=~/Works/${name}/.bare
   WORK=~/Works/${name}/main
@@ -109,6 +116,17 @@ for name in "${PROJECTS[@]}"; do
     echo "$(date) [${name}] Stale image (deployed=${DEPLOYED:0:7} vs source=${REMOTE:0:7}) — rebuilding" >> "$LOG"
   fi
 
+  # 빌드되는 것은 $WORK 의 워킹트리다 — 그것이 origin/main 인지 여기서 확인한다.
+  # 위의 merge 는 통과했을 수 있다(앞서 있는 브랜치에서는 no-op 으로 성공한다).
+  guard_reason=$(deploy_ref_guard_reason "$WORK" "$REMOTE")
+  if [ -n "$guard_reason" ]; then
+    echo "$(date) [${name}] REFUSING TO DEPLOY — ${guard_reason}. Branch work belongs in a worktree (scripts/create-worktree.sh), not in $WORK." >> "$LOG"
+    continue
+  fi
+  BUILD_SHA=$(git -C "$WORK" rev-parse HEAD 2>/dev/null)
+  dirty=$(deploy_ref_guard_dirty_tracked "$WORK")
+  [ -n "$dirty" ] && echo "$(date) [${name}] WARNING: ${dirty} tracked file(s) modified in $WORK — the built tree is not exactly ${BUILD_SHA:0:7}" >> "$LOG"
+
   if [ -f "$COMPOSE" ]; then
     PROJECT_NAME=$(echo "$name" | tr '[:upper:]' '[:lower:]')
     # ``--force-recreate`` (Round 4 Phase 8 dogfood 2026-05-11): without
@@ -141,7 +159,12 @@ for name in "${PROJECTS[@]}"; do
 
   # Record the commit we just deployed so the next loop knows the
   # container matches LOCAL even when LOCAL == REMOTE.
-  echo "$REMOTE" > "$DEPLOYED_FILE"
+  #
+  # ⚠️ **빌드한 것**을 적는다. 예전에는 $REMOTE 를 적었는데, 워킹트리가 다른 커밋일
+  # 때 그 기록이 거짓이 되고(2026-09-01: 브랜치를 빌드하고 40d811a 라 기록) 매
+  # 사이클 재배포가 도는 루프가 됐다. 가드 통과 후엔 둘이 같지만, 같다는 것을
+  # 기록이 **가정하지 않게** 한다.
+  echo "$BUILD_SHA" > "$DEPLOYED_FILE"
   echo "$(date) [${name}] Done" >> "$LOG"
 done
 
@@ -254,7 +277,20 @@ done
         echo "$(date) [${name}] Stale image (deployed=${DEPLOYED:0:7} vs source=${REMOTE:0:7}) — rebuilding" >> "$LOG"
       fi
 
+      # 빌드되는 것은 $WORK 의 워킹트리다. 위의 ``merge --ff-only`` 는 가드가 아니다 —
+      # 앞서 있는 브랜치에서는 "Already up to date" 로 **성공**한다(2026-09-01 사고).
+      # 그러니 빌드 직전에 "HEAD 가 origin/main 인가"를 직접 묻는다.
       if [ "$proceed" = true ]; then
+        guard_reason=$(deploy_ref_guard_reason "$WORK" "$REMOTE")
+        if [ -n "$guard_reason" ]; then
+          echo "$(date) [${name}] REFUSING TO DEPLOY — ${guard_reason}. Branch work belongs in a worktree (scripts/create-worktree.sh), not in $WORK." >> "$LOG"
+          proceed=false
+        fi
+      fi
+
+      if [ "$proceed" = true ]; then
+        dirty=$(deploy_ref_guard_dirty_tracked "$WORK")
+        [ -n "$dirty" ] && echo "$(date) [${name}] WARNING: ${dirty} tracked file(s) modified in $WORK — the built tree is not exactly origin/main" >> "$LOG"
         [ -z "$RECREATE_SVCS" ] && echo "$(date) [${name}] deploy/ changed — recreating full stack" >> "$LOG"
         # sandbox-dind carries a FIXED `container_name`, and `--force-recreate`
         # renames the old container to `<id>_bsvibe-sandbox-dind` before creating
@@ -280,8 +316,9 @@ done
         if docker compose -p bsvibe-prod \
              -f "$COMPOSE_BASE" -f "$COMPOSE_PROD" --env-file "$ENV_PROD" \
              up -d --build --force-recreate $RECREATE_SVCS >> "$LOG" 2>&1; then
-          echo "$REMOTE" > "$DEPLOYED_FILE"
-          echo "$(date) [${name}] Done" >> "$LOG"
+          # 빌드한 것을 적는다 — $REMOTE 를 적으면 워킹트리가 다를 때 기록이 거짓이 된다.
+          echo "$(git -C "$WORK" rev-parse HEAD 2>/dev/null)" > "$DEPLOYED_FILE"
+          echo "$(date) [${name}] Done — deployed ${GIT_SHA}" >> "$LOG"
           # Reclaim the previous (now-dangling) image + aged build cache so
           # rebuilds don't accumulate — the 451GB image pileup that nearly filled
           # the dev+prod disk (2026-08-03). Dangling-only (NOT -a) so base images
