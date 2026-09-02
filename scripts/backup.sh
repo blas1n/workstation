@@ -20,6 +20,15 @@ set -euo pipefail
 # (/opt/homebrew/bin) is not found and the script mis-reports the DB as down.
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
+# Pin the docker context — autodeploy.sh and watchdog.sh guard the same hazard.
+# The CLI's current context is global user state, so a `colima start
+# <other-profile>` elsewhere repoints these calls at a VM with no bsvibe
+# containers. This script then aborts with "postgres container is not running"
+# while postgres is healthy, and the day's backup simply does not happen.
+# (2026-08-09: the context had drifted to colima-palworld; the 03:00 dump was
+# skipped for exactly this reason.)
+export DOCKER_CONTEXT=colima
+
 BACKUP_DIR="${1:-$HOME/backups/bsvibe}"
 RETENTION_DAYS="${BSVIBE_BACKUP_RETENTION_DAYS:-14}"
 # Minimum plausible gzipped dump size (bytes). The real dump is ~18MB gzipped;
