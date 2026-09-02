@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.blas1n.bsvibe-e2e-live-nightly</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/blasin/Works/_infra/scripts/e2e-live-nightly.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/blasin/Works/bsvibe-app/main</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/blasin</string>
+        <key>PATH</key>
+        <string>/Users/blasin/.local/bin:/Users/blasin/.nvm/versions/node/v24.13.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+    <!-- 04:20 KST — 백업(03:00)과 겹치지 않고, 형님이 안 쓰는 시간. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key><integer>4</integer>
+        <key>Minute</key><integer>20</integer>
+    </dict>
+    <!-- RunAtLoad 없음 — 데몬 등록이나 재부팅이 곧 라이브 로그인 시도가 되면 안 된다. -->
+    <key>StandardOutPath</key>
+    <string>/Users/blasin/Works/_infra/logs/e2e-live-nightly.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/blasin/Works/_infra/logs/e2e-live-nightly.launchd.log</string>
+</dict>
+</plist>

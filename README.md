@@ -115,6 +115,35 @@ scripts/autodeploy.sh
 Targets: bloasis, BSGateway, BSNexus, bsai, BSForge, BSage (projects with `deploy/docker-compose.yml`).
 Logs: `logs/autodeploy.log`
 
+### e2e-live-nightly.sh
+
+CI 가 **구조적으로 못 도는** 두 검사를 이 머신에서 하루 한 번(04:20 KST) 돌린다.
+
+| 검사 | 왜 CI 가 못 도나 |
+|---|---|
+| compose 렌더링 (기본값 + **오버라이드 대조군**) | CI 샌드박스에 docker 바이너리가 없다 |
+| 인증된 셸 라이브 E2E (`apps/pwa/e2e-live/`) | docker 스택 + 실제 SSO 계정이 필요하다 |
+
+레포의 가드는 compose **텍스트**만 고정한다(bsvibe-app #870 의 알려진 한계).
+compose 가 `${VAR:-default}` 를 해석하는 방식이 바뀌면 텍스트 가드는 그대로 통과한다.
+실측으로 확인한 것 — **파라미터화를 하드코딩으로 되돌리면 기본값 렌더링은 여전히
+통과하고, 오버라이드 대조군만 그걸 잡는다.** 두 반쪽 다 하중을 받는다.
+
+```bash
+ln -sf ~/Works/_infra/launchd/com.blas1n.bsvibe-e2e-live-nightly.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.blas1n.bsvibe-e2e-live-nightly.plist
+
+# 라이브 E2E 절반을 켜려면 자격증명을 Keychain 에 넣는다 (평문 파일 없음):
+security add-generic-password -s bsvibe-e2e-live -a admin@bsvibe.dev -w
+```
+
+넣기 전까지는 렌더링 검사만 지키고 **알람을 울리지 않는다** — 사람을 기다리는 것은
+장애가 아니고, 그런 알람은 곧 무시돼서 진짜 고장을 가린다.
+
+실패하면 watchdog 과 같은 Telegram 경로로 알린다(`~/.bsvibe/watchdog.env`).
+로그: `logs/e2e-live-nightly.log`. 일회용 스택(`bsvibe-e2e-live`)은 `trap` 으로
+**무슨 일이 있어도** 내린다 — "끝에서 정리"는 부모가 먼저 죽으면 안 돈다.
+
 ## See Also
 
 - [port-map.md](port-map.md) — detailed port allocation map
