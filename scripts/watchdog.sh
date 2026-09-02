@@ -136,6 +136,38 @@ if docker inspect -f '{{.State.Running}}' bsvibe-prod-backend-1 2>/dev/null | gr
   [ "$prod_gb" -ge "$PRODUCTS_DIR_WARN_GB" ] && add "📦 제품 저장소 /app/var/products = ${prod_gb}GB — 유휴 제품 회수가 안 되는 중(발행 실패 의심)"
 fi
 
+# 8. 고아 폭주 프로세스 — 에이전트/실험이 남긴 잔존물, 그리고 "조용한 지속".
+# 2026-09-01 실측: CI 기아를 흉내내려 띄운 busy loop 8개가 `kill $LOADPIDS` 를
+# 못 받고(부모 셸이 먼저 죽어 PPID 1 로 고아화) **20시간 동안 CPU 8코어를 물고**
+# 돌았다. load 10.4 로 이 맥 전체가 느려졌는데 **아무 알림도 없었다** — prod 도,
+# 워커도, 모든 시간 측정도 그 위에서 돌았다.
+#
+# 판정은 이름이 아니라 **행동**으로 한다(철자 목록은 상상력만 증명한다):
+#   부모가 없고(PPID 1) + 내 계정이고 + CPU 를 계속 물고 + 오래됐다.
+# 정상 데몬은 유휴라 여기 안 걸린다. 걸리는 게 정상인 것은 아래 하나뿐이며,
+# 이 allowlist 는 썩으면 **침묵이 아니라 소음** 쪽으로 실패한다(놓치는 게 아니라
+# 시끄러워진다) — 새 항목은 그 근거를 여기 적고 추가해라.
+#   · Virtualization.framework = Docker 의 VM. 상시 고CPU 가 설계다.
+# ⚠️ 경로로 거르지 마라 — 공격자도 /bin/zsh · /usr/bin/python3 를 쓴다.
+ORPHAN_CPU_PCT="${BSVIBE_ORPHAN_CPU_PCT:-50}"
+ORPHAN_MIN_S="${BSVIBE_ORPHAN_MIN_S:-1800}"
+orphans=$(ps -eo pid,ppid,user,etime,%cpu,comm | awk \
+  -v me="$(id -un)" -v cpu="$ORPHAN_CPU_PCT" -v mins="$ORPHAN_MIN_S" '
+function secs(e,  n,a,d) {
+  d=0; if (e ~ /-/) { split(e,a,"-"); d=a[1]; e=a[2] }
+  n=split(e,a,":");
+  if (n==3) return d*86400+a[1]*3600+a[2]*60+a[3]
+  if (n==2) return d*86400+a[1]*60+a[2]
+  return 0
+}
+NR>1 && $2==1 && $3==me && $5>=cpu && secs($4)>=mins {
+  if ($6 ~ /^\/System\/Library\/Frameworks\/Virtualization\.framework\//) next
+  printf "%s(%s%%,%s) ", $1, $5, $4
+}')
+if [ -n "$orphans" ]; then
+  add "$(printf '🧟 고아 폭주 프로세스: %s— 부모 없이 CPU 를 물고 있다. 세션이 남긴 잔존물이거나 원치 않는 지속. 확인: ps -o pid,ppid,%%cpu,etime,command -p <pid>' "$orphans")"
+fi
+
 # --- debounce + notify ---
 sig=$(printf '%b' "$breaches" | sort | md5 2>/dev/null || printf '%b' "$breaches" | md5sum | cut -d' ' -f1)
 last_sig=""; last_ts=0
