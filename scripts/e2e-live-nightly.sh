@@ -94,6 +94,21 @@ fi
 # ===========================================================================
 # 2. 인증된 셸 라이브 E2E
 # ===========================================================================
+# ⚠️ 도구 검사는 자격증명 게이트 **앞**에 있어야 한다.
+#
+# 실측 2026-09-03: `@playwright/test` 가 package.json 에 선언만 돼 있고 이 머신엔
+# 설치돼 있지 않았다(`node_modules` 7/7 자, 그 패키지는 9월 추가 — 빠진 devDep 이
+# 13개 중 딱 하나). CI 는 매번 fresh install 이라 초록이었고, 로컬 소비자는 이
+# 러너뿐인데 이 러너는 **그 줄에 도달한 적이 없었다.** 자격증명이 없어 늘 SKIP 됐기
+# 때문이다. 그대로 뒀으면 형님이 Keychain 에 비밀번호를 넣는 **바로 그 순간**
+# `playwright: command not found` 로 죽었을 것이고, 방금 한 행동 탓으로 보였을 것이다.
+#
+# 게이트 뒤에 두면 같은 함정에 다시 걸린다 — 그래서 앞이다. 그리고 이건 SKIP 이
+# 아니라 FAIL 이다: 도구 부재는 사람을 기다리는 상태가 아니라 이 머신의 고장이다.
+if ! ( cd "$PWA" && pnpm exec playwright --version ) >/dev/null 2>&1; then
+  fail "playwright 실행 불가 ($PWA) — 자격증명이 들어와도 라이브 E2E 는 못 돈다. 고치기: cd $PWA && pnpm install"
+fi
+
 password=$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$E2E_EMAIL" -w 2>/dev/null)
 if [ -z "$password" ]; then
   # 설정 대기는 장애가 아니다 — 사람을 기다리는 것을 알람으로 만들면 그 알람은
