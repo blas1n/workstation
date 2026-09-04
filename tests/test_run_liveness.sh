@@ -27,10 +27,27 @@ trap cleanup EXIT
 echo "== 임시 Postgres 기동 =="
 docker run --rm -d --name "$PGC" -e POSTGRES_PASSWORD=t -e POSTGRES_USER=t -e POSTGRES_DB=t \
   postgres:16-alpine >/dev/null
-for _ in $(seq 1 30); do
-  docker exec "$PGC" pg_isready -U t -d t >/dev/null 2>&1 && break
+# ⚠️ 2026-09-04. 원래는 `pg_isready && break` 만 돌고 **루프가 다 소진돼도 그대로
+# 진행**했다. 그래서 준비 실패가 성공과 구분되지 않았고, 실제 증상은 본문 케이스가
+# 전부 빨개지면서 `database "t" does not exist` · `No such file or directory` 를
+# 뱉는 것이었다 — **원인을 엉뚱한 곳(내 변경)으로 가리킨다.**
+#
+# ⭐ 그리고 `pg_isready` 는 이 이미지에서 **너무 일찍 성공한다**: postgres 공식
+#    이미지는 initdb 동안 **임시 서버**를 띄웠다가 껐다 다시 켠다. 그 사이 창에서
+#    pg_isready 가 초록을 준다. 그래서 준비 판정을 **실제 쿼리**로 바꾼다 —
+#    우리가 정말 필요한 능력이 그것이다.
+ready=0
+for _ in $(seq 1 60); do
+  if docker exec "$PGC" psql -U t -d t -tAc 'select 1' >/dev/null 2>&1; then ready=1; break; fi
   sleep 1
 done
+if [ "$ready" -ne 1 ]; then
+  echo "FAIL: 임시 Postgres 가 60초 안에 쿼리를 받지 못했다 — 아래 케이스는 돌리지 않는다"
+  echo "      (여기서 멈추지 않으면 준비 실패가 '테스트 실패'로 위장한다)"
+  docker logs "$PGC" 2>&1 | tail -15
+  docker rm -f "$PGC" >/dev/null 2>&1
+  exit 1
+fi
 
 q() { docker exec "$PGC" psql -U t -d t -tAc "$1" 2>&1 | tr -d '[:space:]'; }
 
