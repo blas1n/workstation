@@ -27,6 +27,13 @@ WATCHDOG_ENV="${BSVIBE_E2E_ALERT_ENV:-$HOME/.bsvibe/watchdog.env}"
 KEYCHAIN_SERVICE="bsvibe-e2e-live"
 E2E_EMAIL="${BSVIBE_E2E_EMAIL:-admin@bsvibe.dev}"
 
+# 자격증명 읽기 실패를 원인별로 나눈다. 로드가 실패하면 판정 함수가 없어 빈 문자열이
+# 되고 "unreadable 이 아니다"가 조용히 통과하므로, 로드 자체를 확인한다.
+# shellcheck source=lib/keychain_credential.sh
+. "$(dirname "$0")/lib/keychain_credential.sh"
+declare -F keychain_credential_verdict >/dev/null || {
+  echo "FATAL: lib/keychain_credential.sh 로드 실패 — 판정 없이 돌면 안 된다"; exit 1; }
+
 mkdir -p "$LOG_DIR"
 exec >>"$LOG" 2>&1
 echo "===== $(date -u +%Y-%m-%dT%H:%M:%SZ) e2e-live-nightly start ====="
@@ -109,12 +116,27 @@ if ! ( cd "$PWA" && pnpm exec playwright --version ) >/dev/null 2>&1; then
   fail "playwright 실행 불가 ($PWA) — 자격증명이 들어와도 라이브 E2E 는 못 돈다. 고치기: cd $PWA && pnpm install"
 fi
 
-password=$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$E2E_EMAIL" -w 2>/dev/null)
-if [ -z "$password" ]; then
+# ⚠️ stderr 를 버리지 마라. 예전엔 `2>/dev/null` 이었고, 그래서 **빈 문자열이 곧
+# 주장**이었다 — "자격증명이 없다". 잠긴 keychain(rc=36)도 똑같이 그 문장을 입는다.
+# 그러면 형님은 방금 넣은 자격증명을 의심하게 되고, 원인은 다른 데 있다.
+# 판정은 lib/keychain_credential.sh 의 순수 함수가 한다 (여기는 테스트가 못 닿는다).
+kc_err=$(mktemp)
+password=$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$E2E_EMAIL" -w 2>"$kc_err")
+kc_rc=$?
+[ -n "$password" ] && kc_has=1 || kc_has=0
+kc_verdict=$(keychain_credential_verdict "$kc_rc" "$kc_has")
+kc_reason=$(keychain_credential_reason "$kc_rc" "$(tr -d '\n' <"$kc_err")")
+rm -f "$kc_err"
+
+if [ "$kc_verdict" = unreadable ]; then
+  # 사람을 기다리는 상태가 **아니다** — 항목이 거기 있어도 못 읽는 것일 수 있다.
+  # 위 playwright 검사와 같은 판단이다: 이 머신의 고장은 SKIP 이 아니라 FAIL 이다.
+  fail "라이브 E2E 자격증명을 읽을 수 없다 — $kc_reason"
+elif [ "$kc_verdict" = absent ]; then
   # 설정 대기는 장애가 아니다 — 사람을 기다리는 것을 알람으로 만들면 그 알람은
   # 곧 무시되고, 진짜 고장이 났을 때 아무도 안 본다. 알림 없이 크게 로그만 남긴다.
   # (렌더링 검사 절반은 이미 돌았고, 그건 실패하면 알린다.)
-  echo "SKIP: 라이브 E2E — Keychain 에 자격증명이 없다."
+  echo "SKIP: 라이브 E2E — $kc_reason"
   echo "      설정: security add-generic-password -s $KEYCHAIN_SERVICE -a $E2E_EMAIL -w"
   echo "      (넣기 전까지 이 데몬은 compose 렌더링 검사만 지킨다)"
 else
