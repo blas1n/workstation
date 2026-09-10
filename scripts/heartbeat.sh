@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# heartbeat — dead-man's-switch PUSH to an OFF-BOX monitor (readiness audit §Ⅳ,
+# 게이트 3). Every monitor that runs ON the Mac Mini (watchdog, uptime-probe)
+# dies WITH the machine — a power cut / kernel panic / network loss goes
+# unnoticed. This pings an external check URL ONLY while prod is actually healthy;
+# if the box dies OR prod goes down, the pings stop and the external service
+# alerts. Superior to poll-in monitoring (which a CF cache or tunnel quirk can
+# fool, and which cannot see a dead machine vs a slow one).
+#
+# Setup (the one off-box step): create a free "cron/heartbeat" check at
+# healthchecks.io (or BetterStack Heartbeats), set its expected period a bit
+# ABOVE this interval, and put its ping URL in ~/.bsvibe/heartbeat.env:
+#     HEARTBEAT_PING_URL=https://hc-ping.com/<uuid>
+# Until that file/URL exists this logs a one-line NOTE and exits 0 (inert).
+set -uo pipefail
+
+ENV_FILE="${HEARTBEAT_ENV:-$HOME/.bsvibe/heartbeat.env}"
+HEALTH_URL="${BSVIBE_HEALTH_URL:-https://api.bsvibe.dev/api/v1/health}"
+# shellcheck disable=SC1090
+[ -f "$ENV_FILE" ] && . "$ENV_FILE"
+PING_URL="${HEARTBEAT_PING_URL:-}"
+ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+if [ -z "$PING_URL" ]; then
+  echo "[$ts] NOTE: HEARTBEAT_PING_URL unset ($ENV_FILE) — off-box heartbeat inert." >&2
+  exit 0
+fi
+
+# Only ping while prod actually answers: any real HTTP response (200/404/401…)
+# from the backend means tunnel + app are up. 000 (no connection) / 5xx = down,
+# so we DO NOT ping and the external check fires on its own schedule.
+code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$HEALTH_URL" 2>/dev/null)"
+code="${code:-000}"
+case "$code" in
+  000|5??)
+    echo "[$ts] prod unhealthy (HTTP $code) — withholding heartbeat so the off-box check fires." >&2
+    exit 1
+    ;;
+esac
+
+# Healthy — ping the dead-man's-switch. ``/fail`` is not used; absence IS the signal.
+if curl -fsS -m 15 "$PING_URL" >/dev/null 2>&1; then
+  exit 0
+fi
+echo "[$ts] heartbeat ping to the off-box monitor failed (network?) — will retry." >&2
+exit 1
