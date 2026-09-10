@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.blas1n.colima-ensure</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/blasin/Works/_infra/scripts/colima-ensure.sh</string>
+  </array>
+  <!-- Retry at boot AND every 60s: closes the brew unit's "no retry on a failed
+       start" gap. A no-op while colima is up. -->
+  <key>StartInterval</key><integer>60</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/Users/blasin/Works/_infra/logs/colima-ensure.log</string>
+  <key>StandardErrorPath</key><string>/Users/blasin/Works/_infra/logs/colima-ensure.log</string>
+</dict>
+</plist>
