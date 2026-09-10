@@ -15,7 +15,7 @@
 set -uo pipefail
 
 ENV_FILE="${HEARTBEAT_ENV:-$HOME/.bsvibe/heartbeat.env}"
-HEALTH_URL="${BSVIBE_HEALTH_URL:-https://api.bsvibe.dev/api/v1/health}"
+HEALTH_URL="${BSVIBE_HEALTH_URL:-https://api.bsvibe.dev/api/health}"
 # shellcheck disable=SC1090
 [ -f "$ENV_FILE" ] && . "$ENV_FILE"
 PING_URL="${HEARTBEAT_PING_URL:-}"
@@ -26,17 +26,20 @@ if [ -z "$PING_URL" ]; then
   exit 0
 fi
 
-# Only ping while prod actually answers: any real HTTP response (200/404/401…)
-# from the backend means tunnel + app are up. 000 (no connection) / 5xx = down,
-# so we DO NOT ping and the external check fires on its own schedule.
+# Only ping while prod actually answers ITS OWN health route with 200.
+# ``/api/health`` returns {"status":"ok","version":…,"git_sha":…}.
+#
+# This used to probe ``/api/v1/health`` — a path that DOES NOT EXIST — and accept
+# "any real HTTP response (200/404/401…)" as healthy. So the 404 that Caddy or
+# Cloudflare returns with the backend completely gone read as "prod is up", and
+# the heartbeat would have kept pinging happily through exactly the outage it
+# exists to catch. A check that cannot go red measures nothing.
 code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$HEALTH_URL" 2>/dev/null)"
 code="${code:-000}"
-case "$code" in
-  000|5??)
-    echo "[$ts] prod unhealthy (HTTP $code) — withholding heartbeat so the off-box check fires." >&2
-    exit 1
-    ;;
-esac
+if [ "$code" != "200" ]; then
+  echo "[$ts] prod unhealthy (HTTP $code) — withholding heartbeat so the off-box check fires." >&2
+  exit 1
+fi
 
 # Healthy — ping the dead-man's-switch. ``/fail`` is not used; absence IS the signal.
 if curl -fsS -m 15 "$PING_URL" >/dev/null 2>&1; then
