@@ -43,6 +43,15 @@ DATE="$(date +%Y-%m-%d_%H%M)"
 BACKUP_FILE="$BACKUP_DIR/bsvibe_${DATE}.sql.gz"
 SUCCESS_MARKER="$BACKUP_DIR/.last-success"   # a watchdog checks this file's mtime
 
+# Vault = the founder's knowledge (Markdown, the SoT) + skills, in the backend
+# container's appdata volume. pg_dump does NOT cover it, so a disk loss wiped the
+# knowledge entirely (readiness audit §Ⅳ, "높음"). Small (~14MB) and irreplaceable
+# — backed up here too. runs/products are reconstructable (repos + R2 bundles) and
+# huge, so they are deliberately NOT backed up.
+BACKEND_CONTAINER="${BSVIBE_BACKEND_CONTAINER:-bsvibe-prod-backend-1}"
+VAULT_FILE="$BACKUP_DIR/vault_${DATE}.tgz"
+VAULT_MIN_BYTES="${BSVIBE_VAULT_MIN_BYTES:-1024}"
+
 mkdir -p "$BACKUP_DIR"
 
 fail() {
@@ -50,6 +59,28 @@ fail() {
   echo "=== BSVibe backup FAILED — $DATE — $1 ===" >&2
   # Leave the success marker STALE (do not touch it) so freshness monitors fire.
   exit 1
+}
+
+# r2_upload FILE — copy one file to the R2 remote (off-box; the Mac Mini disk is
+# itself a SPOF). Forces IPv4 (the token is allow-listed to the host's IPv4
+# egress; rclone otherwise prefers IPv6 → 403) and --s3-no-check-bucket (the
+# bucket-scoped token cannot CreateBucket/HeadBucket/List). Returns non-zero on
+# failure so the caller can ``fail``. No-op (returns 0) when rclone's r2 remote
+# is not configured — the caller logs a local-only NOTE.
+R2_DEST="${BSVIBE_BACKUP_R2_DEST:-r2:bsvibe-backups}"
+r2_ready() {
+  command -v rclone >/dev/null 2>&1 && rclone listremotes 2>/dev/null | grep -q "^${R2_DEST%%:*}:"
+}
+r2_upload() {
+  _f="$1"
+  BIND_V4="$(ipconfig getifaddr "$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')" 2>/dev/null || true)"
+  BIND_ARG=""
+  [ -n "$BIND_V4" ] && BIND_ARG="--bind $BIND_V4"
+  echo "  Off-box → ${R2_DEST}/$(basename "$_f") (IPv4 ${BIND_V4:-auto}) ..."
+  # shellcheck disable=SC2086
+  rclone copyto "$_f" "${R2_DEST}/$(basename "$_f")" \
+    $BIND_ARG --s3-no-check-bucket --retries 3 --low-level-retries 5 --timeout 180s \
+    2>"$BACKUP_DIR/.r2.err"
 }
 
 echo "=== BSVibe database backup — $DATE ==="
@@ -100,16 +131,8 @@ echo "  Retained $KEPT dump(s) (last ${RETENTION_DAYS} days)."
 # so we must: (a) force IPv4 — rclone otherwise prefers the endpoint's IPv6,
 # whose source IP is NOT allow-listed → 403; (b) --s3-no-check-bucket to skip the
 # CreateBucket/HeadBucket/List ops a bucket-scoped token can't perform.
-R2_DEST="${BSVIBE_BACKUP_R2_DEST:-r2:bsvibe-backups}"
-if command -v rclone >/dev/null 2>&1 && rclone listremotes 2>/dev/null | grep -q "^${R2_DEST%%:*}:"; then
-  BIND_V4="$(ipconfig getifaddr "$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')" 2>/dev/null || true)"
-  BIND_ARG=""
-  [ -n "$BIND_V4" ] && BIND_ARG="--bind $BIND_V4"
-  echo "  Off-box → ${R2_DEST}/$(basename "$BACKUP_FILE") (IPv4 ${BIND_V4:-auto}) ..."
-  # shellcheck disable=SC2086
-  if rclone copyto "$BACKUP_FILE" "${R2_DEST}/$(basename "$BACKUP_FILE")" \
-      $BIND_ARG --s3-no-check-bucket --retries 3 --low-level-retries 5 --timeout 180s \
-      2>"$BACKUP_DIR/.r2.err"; then
+if r2_ready; then
+  if r2_upload "$BACKUP_FILE"; then
     echo "  Off-box R2 copy OK."
   else
     head -c 400 "$BACKUP_DIR/.r2.err" >&2 || true
@@ -120,6 +143,44 @@ else
 fi
 # R2 retention: the bucket-scoped token cannot List/Delete, so old objects are
 # pruned by an R2 bucket lifecycle rule (set in the Cloudflare dashboard), not here.
+
+# 5b. Vault + skills backup (the knowledge SoT; pg_dump does not cover it).
+echo "  Backing up vault + skills from $BACKEND_CONTAINER ..."
+if ! docker inspect -f '{{.State.Running}}' "$BACKEND_CONTAINER" >/dev/null 2>&1; then
+  fail "backend container $BACKEND_CONTAINER is not running (vault backup)"
+fi
+# tar only the irreplaceable trees (vault + skills), NOT runs/products (huge,
+# reconstructable). ``|| true`` on tar's exit is NOT used — a tar error must fail.
+if ! docker exec "$BACKEND_CONTAINER" tar czf - -C /app/var vault skills 2>"$BACKUP_DIR/.vault.err" > "$VAULT_FILE"; then
+  head -c 400 "$BACKUP_DIR/.vault.err" >&2 || true
+  rm -f "$VAULT_FILE"
+  fail "vault tar pipeline errored"
+fi
+if ! gzip -t "$VAULT_FILE" 2>/dev/null; then
+  rm -f "$VAULT_FILE"
+  fail "vault archive failed gzip integrity check"
+fi
+VBYTES="$(wc -c < "$VAULT_FILE" | tr -d '[:space:]')"
+if [ "$VBYTES" -lt "$VAULT_MIN_BYTES" ]; then
+  rm -f "$VAULT_FILE"
+  fail "vault archive too small (${VBYTES}B < ${VAULT_MIN_BYTES}B) — likely empty/partial"
+fi
+# Contains real content: at least one .md under vault/.
+if ! tar tzf "$VAULT_FILE" 2>/dev/null | grep -q 'vault/.*\.md'; then
+  rm -f "$VAULT_FILE"
+  fail "vault archive has no vault/*.md files — not a real knowledge tree"
+fi
+VSIZE="$(du -h "$VAULT_FILE" | cut -f1)"
+echo "  Vault OK — $VAULT_FILE ($VSIZE)"
+find "$BACKUP_DIR" -name 'vault_*.tgz' -type f -mtime "+${RETENTION_DAYS}" -delete 2>/dev/null || true
+if r2_ready; then
+  if r2_upload "$VAULT_FILE"; then
+    echo "  Vault off-box R2 copy OK."
+  else
+    head -c 400 "$BACKUP_DIR/.r2.err" >&2 || true
+    fail "vault off-box R2 upload failed (local archive is OK)"
+  fi
+fi
 
 # 6. Stamp success (watchdog reads this mtime for a >24h-stale alert).
 date -u +%Y-%m-%dT%H:%M:%SZ > "$SUCCESS_MARKER"
