@@ -144,26 +144,20 @@ fi
 #
 # 판정은 이름이 아니라 **행동**으로 한다(철자 목록은 상상력만 증명한다):
 #   부모가 없고(PPID 1) + 내 계정이고 + CPU 를 계속 물고 + 오래됐다.
-# 정상 데몬은 유휴라 여기 안 걸린다. 걸리는 게 정상인 것은 아래 하나뿐이며,
-# 이 allowlist 는 썩으면 **침묵이 아니라 소음** 쪽으로 실패한다(놓치는 게 아니라
-# 시끄러워진다) — 새 항목은 그 근거를 여기 적고 추가해라.
-#   · Virtualization.framework = Docker 의 VM. 상시 고CPU 가 설계다.
 # ⚠️ 경로로 거르지 마라 — 공격자도 /bin/zsh · /usr/bin/python3 를 쓴다.
+# Virtualization.framework(Docker VM, 상시 고CPU 가 설계)만 유일 예외이며 lib 안에.
+#
+# ⭐ 2026-09-10: `ps ... %cpu` 는 **수명 누적 평균**이라, 수명이 긴 시스템 데몬
+# (mediaanalysisd 등)이 과거 한 번 스파이크하면 평균이 며칠간 임계 위에 붙어
+# **지금 유휴인데도** 계속 알렸다. 그래서 후보마다 **순간 CPU 를 한 번 더 재서**
+# (top 2차 샘플) 지금도 hot 인 것만 남긴다. 진짜 busy loop 은 순간에도 hot 이라 잡힌다.
+# 판정 로직은 scripts/lib/watchdog_orphans.sh 에 분리(테스트: test_watchdog_orphan_detection.sh).
 ORPHAN_CPU_PCT="${BSVIBE_ORPHAN_CPU_PCT:-50}"
 ORPHAN_MIN_S="${BSVIBE_ORPHAN_MIN_S:-1800}"
-orphans=$(ps -eo pid,ppid,user,etime,%cpu,comm | awk \
-  -v me="$(id -un)" -v cpu="$ORPHAN_CPU_PCT" -v mins="$ORPHAN_MIN_S" '
-function secs(e,  n,a,d) {
-  d=0; if (e ~ /-/) { split(e,a,"-"); d=a[1]; e=a[2] }
-  n=split(e,a,":");
-  if (n==3) return d*86400+a[1]*3600+a[2]*60+a[3]
-  if (n==2) return d*86400+a[1]*60+a[2]
-  return 0
-}
-NR>1 && $2==1 && $3==me && $5>=cpu && secs($4)>=mins {
-  if ($6 ~ /^\/System\/Library\/Frameworks\/Virtualization\.framework\//) next
-  printf "%s(%s%%,%s) ", $1, $5, $4
-}')
+# shellcheck source=/dev/null
+source "$(dirname "$0")/lib/watchdog_orphans.sh"
+orphans=$(ps -eo pid,ppid,user,etime,%cpu,comm \
+  | detect_runaway_orphans _instant_cpu "$(id -un)" "$ORPHAN_CPU_PCT" "$ORPHAN_MIN_S")
 if [ -n "$orphans" ]; then
   add "$(printf '🧟 고아 폭주 프로세스: %s— 부모 없이 CPU 를 물고 있다. 세션이 남긴 잔존물이거나 원치 않는 지속. 확인: ps -o pid,ppid,%%cpu,etime,command -p <pid>' "$orphans")"
 fi
