@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.blas1n.bsvibe-worker-logrotate</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/blasin/Works/_infra/scripts/bsvibe-worker-logrotate.sh</string>
+    </array>
+    <!-- Hourly. The script is a size CAP, not a schedule: it no-ops unless a
+         log is over the threshold, so the cadence only bounds how far past the
+         cap a file can drift between checks. -->
+    <key>StartInterval</key>
+    <integer>3600</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/blasin/Works/_infra/logs/bsvibe-worker-logrotate.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/blasin/Works/_infra/logs/bsvibe-worker-logrotate.log</string>
+</dict>
+</plist>
