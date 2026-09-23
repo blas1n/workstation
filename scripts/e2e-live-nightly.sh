@@ -26,6 +26,9 @@ LOG="$LOG_DIR/e2e-live-nightly.log"
 WATCHDOG_ENV="${BSVIBE_E2E_ALERT_ENV:-$HOME/.bsvibe/watchdog.env}"
 KEYCHAIN_SERVICE="bsvibe-e2e-live"
 E2E_EMAIL="${BSVIBE_E2E_EMAIL:-admin@bsvibe.dev}"
+# launchd 는 login keychain 을 못 연다(아래 §자격증명). 파일이 1순위, keychain 은
+# GUI 세션용 폴백이다. 워커가 같은 벽에 부딪혀 같은 우회를 쓴다.
+CRED_FILE="${BSVIBE_E2E_PASSWORD_FILE:-$HOME/.bsvibe/e2e-live.password}"
 
 # 자격증명 읽기 실패를 원인별로 나눈다. 로드가 실패하면 판정 함수가 없어 빈 문자열이
 # 되고 "unreadable 이 아니다"가 조용히 통과하므로, 로드 자체를 확인한다.
@@ -33,6 +36,8 @@ E2E_EMAIL="${BSVIBE_E2E_EMAIL:-admin@bsvibe.dev}"
 . "$(dirname "$0")/lib/keychain_credential.sh"
 declare -F keychain_credential_verdict >/dev/null || {
   echo "FATAL: lib/keychain_credential.sh 로드 실패 — 판정 없이 돌면 안 된다"; exit 1; }
+declare -F credential_verdict >/dev/null || {
+  echo "FATAL: credential_verdict 없음 — 파일 소스 없이 돌면 launchd 에서 영원히 SKIP 이다"; exit 1; }
 
 mkdir -p "$LOG_DIR"
 exec >>"$LOG" 2>&1
@@ -120,13 +125,33 @@ fi
 # 주장**이었다 — "자격증명이 없다". 잠긴 keychain(rc=36)도 똑같이 그 문장을 입는다.
 # 그러면 형님은 방금 넣은 자격증명을 의심하게 되고, 원인은 다른 데 있다.
 # 판정은 lib/keychain_credential.sh 의 순수 함수가 한다 (여기는 테스트가 못 닿는다).
+# 1순위: 파일. launchd 의 Background 세션에서 **유일하게 되는 길**이다.
+file_verdict=$(credential_file_verdict "$CRED_FILE")
+if [ "$file_verdict" = ok ]; then
+  password=$(cat "$CRED_FILE")
+fi
+
+# 2순위: keychain. GUI 세션에서만 유효하지만, 있으면 쓰는 게 맞다.
 kc_err=$(mktemp)
-password=$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$E2E_EMAIL" -w 2>"$kc_err")
-kc_rc=$?
-[ -n "$password" ] && kc_has=1 || kc_has=0
-kc_verdict=$(keychain_credential_verdict "$kc_rc" "$kc_has")
-kc_reason=$(keychain_credential_reason "$kc_rc" "$(tr -d '\n' <"$kc_err")")
+if [ "$file_verdict" != ok ]; then
+  password=$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$E2E_EMAIL" -w 2>"$kc_err")
+  kc_rc=$?
+else
+  kc_rc=0
+fi
+[ -n "${password:-}" ] && kc_has=1 || kc_has=0
+
+# 사유를 **판정보다 먼저** 고른다. 그래야 판정과 분기 사이에 다른 `else` 가 끼지
+# 않는다 — tests/test_nightly_classifies_the_credential_read.sh 가 그 구간을
+# 범위로 떠서 "unreadable 이 fail() 로 간다"를 정적으로 확인한다.
+if [ "$file_verdict" = unreadable ]; then
+  kc_reason=$(credential_file_reason "$CRED_FILE")
+else
+  kc_reason=$(keychain_credential_reason "$kc_rc" "$(tr -d '\n' <"$kc_err")")
+fi
 rm -f "$kc_err"
+
+kc_verdict=$(credential_verdict "$CRED_FILE" "$kc_rc" "$kc_has")
 
 if [ "$kc_verdict" = unreadable ]; then
   # 사람을 기다리는 상태가 **아니다** — 항목이 거기 있어도 못 읽는 것일 수 있다.
@@ -137,7 +162,13 @@ elif [ "$kc_verdict" = absent ]; then
   # 곧 무시되고, 진짜 고장이 났을 때 아무도 안 본다. 알림 없이 크게 로그만 남긴다.
   # (렌더링 검사 절반은 이미 돌았고, 그건 실패하면 알린다.)
   echo "SKIP: 라이브 E2E — $kc_reason"
-  echo "      설정: security add-generic-password -s $KEYCHAIN_SERVICE -a $E2E_EMAIL -w"
+  # ⚠️ keychain 명령을 먼저 안내하지 마라. 2026-09-23 에 형님이 그대로 하다가
+  #    rc=36 (User interaction not allowed) 로 막혔다 — SSH 셸은 Background
+  #    세션이라 login keychain 에 못 닿는다. 그리고 넣는 데 성공해도 이 데몬
+  #    자신이 launchd 라 못 읽는다. 되는 길을 1순위로 적는다.
+  echo "      설정(권장, launchd 에서 되는 길):"
+  echo "        install -m 600 /dev/null $CRED_FILE && printf %s '<password>' > $CRED_FILE"
+  echo "      설정(대안, GUI 세션에서만): security add-generic-password -s $KEYCHAIN_SERVICE -a $E2E_EMAIL -w"
   echo "      (넣기 전까지 이 데몬은 compose 렌더링 검사만 지킨다)"
 else
   echo "--- e2e-live stack up ---"

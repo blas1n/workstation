@@ -31,9 +31,22 @@ grep -q 'declare -F keychain_credential_verdict' "$SCRIPT" \
   || bad "runner pins that the lib actually loaded" "빈 판정은 '괜찮다'가 아니라 '미로드'다"
 
 echo "== 3. 판정을 실제로 부른다 =="
-for fn in keychain_credential_verdict keychain_credential_reason; do
+# 2026-09-23: 러너가 두 소스(파일 + keychain)를 보게 되면서 호출 지점이
+# `credential_verdict` 로 옮겨갔다. 명제는 그대로다 — **판정 함수를 부른다**.
+# 핀을 옮기되 느슨하게 하지 않는다: 파일 판정과 사유도 같이 못 박는다.
+for fn in credential_verdict credential_file_verdict keychain_credential_reason; do
   grep -q "$fn \"" "$SCRIPT" && ok "calls $fn" || bad "calls $fn" "호출 지점이 없다"
 done
+
+echo "== 3b. ⭐ 파일 소스가 keychain 보다 먼저 온다 =="
+# 순서가 뒤집히면 launchd 에서 영원히 SKIP 이다 — 잠긴 keychain 이 먼저 답해버린다.
+fline=$(grep -n 'credential_file_verdict "' "$SCRIPT" | head -1 | cut -d: -f1)
+kline=$(grep -n 'security find-generic-password' "$SCRIPT" | head -1 | cut -d: -f1)
+if [ -n "$fline" ] && [ -n "$kline" ] && [ "$fline" -lt "$kline" ]; then
+  ok "file source is read before the keychain"
+else
+  bad "file source is read before the keychain" "file=$fline keychain=$kline"
+fi
 
 echo "== 4. ⭐ 자격증명 읽기가 stderr 를 버리지 않는다 =="
 # 이 결함의 원본이 정확히 이 한 줄이었다.
@@ -52,7 +65,7 @@ grep -q 'kc_rc=\$?' "$SCRIPT" \
 
 echo "== 6. unreadable 은 SKIP 이 아니라 FAIL 이다 =="
 # 사람 대기(absent)와 머신 고장(unreadable)이 같은 출구로 나가면 알람이 죽는다.
-blk=$(awk '/kc_verdict=\$\(keychain_credential_verdict/,/^else$/' "$SCRIPT")
+blk=$(awk '/kc_verdict=\$\(credential_verdict/,/^else$/' "$SCRIPT")
 case "$blk" in
   *'"$kc_verdict" = unreadable'*) ok "branches on the unreadable verdict" ;;
   *)                              bad "branches on the unreadable verdict" "분기가 없다" ;;
