@@ -46,7 +46,26 @@ while IFS= read -r line || [ -n "$line" ]; do
 
   # 값은 변수에만 담고 **절대 출력하지 않는다.** 실패해도 사유만 말한다.
   if ! secret=$(bw get password "$item" --session "$BW_SESSION" 2>/dev/null); then
-    echo "  FAIL  $item — 금고에서 못 읽었다 (항목 이름이 맞나? bw list items 로 확인)"
+    echo "  FAIL  $item — 금고에서 그 이름의 항목을 못 읽었다"
+    # 도구가 이미 세션을 들고 있다. "이름이 맞나?" 로 끝내면 사람이 별도 명령을
+    # 찾아 쳐야 한다 — 후보를 여기서 보여준다. 값이 아니라 **이름만** 찍는다.
+    key=$(manifest_search_key "$item")
+    if [ -n "$key" ]; then
+      cands=$(bw list items --search "$key" --session "$BW_SESSION" 2>/dev/null \
+                | jq -r '.[].name' 2>/dev/null | head -10)
+      if [ -n "$cands" ]; then
+        echo "        '$key' 로 검색한 후보:"
+        # ⚠️ 줄 단위로 읽는다. `printf ... $cands` 처럼 따옴표 없이 넘기면
+        #    **공백이 든 이름이 쪼개진다**("BSVibe E2E Live" → 세 줄). 후보를
+        #    보여주려던 출력이 후보를 망가뜨리면 안 보여주느니만 못하다.
+        while IFS= read -r cand; do
+          [ -n "$cand" ] && printf '          - %s\n' "$cand"
+        done <<< "$cands"
+        echo "        → secrets.manifest 의 첫 칸을 실제 이름으로 고치면 된다"
+      else
+        echo "        '$key' 로 검색해도 후보가 없다 — 금고에 그 항목 자체가 없을 수 있다"
+      fi
+    fi
     rc=1; continue
   fi
   [ -n "$secret" ] || { echo "  FAIL  $item — 금고의 값이 비어 있다"; rc=1; continue; }

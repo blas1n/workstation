@@ -75,3 +75,15 @@ leaf_verify() {
   [ "$last" = "0a" ] && { echo trailing_newline; return; }
   echo ok
 }
+
+# manifest_search_key <item-name> — 못 찾았을 때 후보를 보여주기 위한 검색어.
+#
+# 하이픈 앞 토큰을 쓴다(`bsvibe-e2e-live` → `bsvibe`). 항목 이름이 조금 다를 때
+# (`BSVibe E2E Live`, `bsvibe/e2e`, …) 걸리게 하려면 전체 이름으로는 못 찾는다.
+# ⚠️ 빈 입력에 빈 검색어를 내는 것은 **의도**다 — 그러면 호출자가 금고 전체를
+#    덤프하지 않도록 막아야 한다는 뜻이고, 그 책임을 여기서 숨기지 않는다.
+manifest_search_key() {
+  local item="${1:-}"
+  [ -n "$item" ] || return 0
+  printf '%s' "${item%%-*}"
+}

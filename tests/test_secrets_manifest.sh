@@ -88,5 +88,17 @@ echo "== 10. 음성 대조군 — 전부 ok 를 뱉는 구현은 통과 못 한�
 seen=$(for c in "$f" "$f2" "$tmp/none"; do leaf_verify "$c"; done | sort -u | tr '\n' ' ')
 case "$seen" in *ok*) bad "대조군: 전부 ok 가 아님" "seen=$seen" ;; *) ok "세 고장이 각각 다른 이름을 얻는다 ($seen)" ;; esac
 
+echo "== 11. ⭐ 못 찾았을 때 쓸 검색어를 항목 이름에서 뽑는다 =="
+# 2026-09-23: 형님이 sync 를 돌렸더니 "금고에서 못 읽었다" 가 떴다. 항목 이름이
+# 다른 것이다. 그때 도구가 "이름이 맞나?" 라고만 하면 사람이 별도 명령을 찾아
+# 쳐야 한다 — 도구는 이미 세션을 들고 있으면서 후보를 못 보여준 셈이다.
+k=$(manifest_search_key "bsvibe-e2e-live")
+[ "$k" = "bsvibe" ] && ok "하이픈 앞을 검색어로" || bad "검색어 추출" "k=$k"
+k=$(manifest_search_key "plain")
+[ "$k" = "plain" ] && ok "하이픈 없으면 통째로" || bad "검색어 추출(하이픈 없음)" "k=$k"
+# 대조군 — 빈 입력에 빈 검색어를 내면 금고 전체를 덤프하게 된다
+k=$(manifest_search_key "")
+[ -z "$k" ] && ok "빈 입력 = 빈 검색어 (호출자가 막아야 한다)" || bad "빈 입력" "k=$k"
+
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAILED"; exit 1; fi
