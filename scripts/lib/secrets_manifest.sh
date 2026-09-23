@@ -87,3 +87,20 @@ manifest_search_key() {
   [ -n "$item" ] || return 0
   printf '%s' "${item%%-*}"
 }
+
+# items_pick_exact <items-json> <name> — 이름이 **정확히** 일치하는 항목의 id.
+#
+# 왜 이름으로 바로 안 가져오나 (2026-09-23 실측):
+# `bw get password <검색어>` 는 검색이다 — 이름뿐 아니라 username/URI 도 훑는다.
+# 금고에 `admin@bsvibe.dev` 라는 **이름**의 항목과, username 이 그 주소인 다른
+# 항목이 함께 있으면 두 건이 잡혀 "More than one result" 로 실패한다. 실제로
+# 후보 목록에 그 이름이 **보이는데도** get 이 실패했다.
+#
+# ⚠️ 정확 일치가 **둘 이상이면 빈 값**을 낸다. 임의로 고르면 엉뚱한 비밀이 파일에
+#    쓰이고, 그건 조용히 틀린다. 모호함은 사람에게 넘긴다.
+items_pick_exact() {
+  local json="${1:-}" name="${2:-}"
+  [ -n "$json" ] && [ -n "$name" ] || return 0
+  printf '%s' "$json" | jq -r --arg n "$name" \
+    '[.[] | select(.name == $n)] | if length == 1 then .[0].id else empty end' 2>/dev/null
+}

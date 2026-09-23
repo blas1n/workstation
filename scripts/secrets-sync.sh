@@ -44,9 +44,34 @@ while IFS= read -r line || [ -n "$line" ]; do
   IFS=$'\t' read -r item dest _ <<<"$line"
   path=$(manifest_dest_expand "$dest")
 
+  # 이름이 아니라 **id** 로 가져온다. `bw get password <검색어>` 는 검색이라
+  # username/URI 까지 훑어서, 후보에 그 이름이 보이는데도 "More than one result"
+  # 로 실패한다 — 2026-09-23 에 실제로 그랬다.
+  items_json=$(bw list items --search "$item" --session "$BW_SESSION" 2>/dev/null)
+  item_id=$(items_pick_exact "$items_json" "$item")
+
+  # ⚠️ stderr 를 버리지 마라. 이 레포는 같은 실수를 keychain 경로에서 이미 한 번
+  #    했고(2>/dev/null 이 이유를 버리고 빈 문자열이 주장이 된다), 이 파일이
+  #    그걸 그대로 반복했다. 사유를 살려야 다음 사람이 재지 않고 안다.
+  fetch_err=$(mktemp)
+  if [ -n "$item_id" ]; then
+    secret=$(bw get password "$item_id" --session "$BW_SESSION" 2>"$fetch_err")
+  else
+    secret=$(bw get password "$item" --session "$BW_SESSION" 2>"$fetch_err")
+  fi
+  fetch_rc=$?
+  reason=$(tr -d '\n' <"$fetch_err"); rm -f "$fetch_err"
+
   # 값은 변수에만 담고 **절대 출력하지 않는다.** 실패해도 사유만 말한다.
-  if ! secret=$(bw get password "$item" --session "$BW_SESSION" 2>/dev/null); then
-    echo "  FAIL  $item — 금고에서 그 이름의 항목을 못 읽었다"
+  if [ "$fetch_rc" != 0 ] || [ -z "${secret:-}" ]; then
+    echo "  FAIL  $item — 금고에서 못 읽었다 (rc=$fetch_rc)${reason:+ | bw: $reason}"
+    if [ -z "$item_id" ]; then
+      echo "        이름이 정확히 일치하는 항목이 **하나가 아니다** — 아래 후보를 보고"
+      echo "        secrets.manifest 의 첫 칸을 정확한 이름으로 맞춰라"
+    else
+      echo "        항목은 찾았다(id 로 조회) — 그 항목에 **password 필드가 없을** 수 있다"
+      echo "        (보안 노트나 password 없는 로그인이면 bw get password 는 실패한다)"
+    fi
     # 도구가 이미 세션을 들고 있다. "이름이 맞나?" 로 끝내면 사람이 별도 명령을
     # 찾아 쳐야 한다 — 후보를 여기서 보여준다. 값이 아니라 **이름만** 찍는다.
     key=$(manifest_search_key "$item")
@@ -68,7 +93,6 @@ while IFS= read -r line || [ -n "$line" ]; do
     fi
     rc=1; continue
   fi
-  [ -n "$secret" ] || { echo "  FAIL  $item — 금고의 값이 비어 있다"; rc=1; continue; }
 
   before=""
   [ -f "$path" ] && before=$(cksum < "$path")

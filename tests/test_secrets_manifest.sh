@@ -100,5 +100,28 @@ k=$(manifest_search_key "plain")
 k=$(manifest_search_key "")
 [ -z "$k" ] && ok "빈 입력 = 빈 검색어 (호출자가 막아야 한다)" || bad "빈 입력" "k=$k"
 
+echo "== 12. ⭐ 이름이 아니라 id 로 집는다 (bw get 은 검색이라 모호하다) =="
+# 2026-09-23: 후보 목록에 `admin@bsvibe.dev` 가 **있는데도** get 이 실패했다.
+# `bw get password <검색어>` 는 이름뿐 아니라 username/URI 도 훑어서, 다른 항목의
+# username 이 admin@bsvibe.dev 면 두 건이 잡히고 "More than one result" 가 난다.
+# ⇒ 정확 일치로 id 를 뽑아 **id 로** 가져온다.
+J='[{"id":"aaa","name":"admin@bsvibe.dev"},{"id":"bbb","name":"Bsvibe"}]'
+i=$(items_pick_exact "$J" "admin@bsvibe.dev")
+[ "$i" = "aaa" ] && ok "정확 일치 하나 → id" || bad "정확 일치 → id" "i=$i"
+
+echo "== 13. 정확 일치가 없으면 빈 값 (지어내지 않는다) =="
+i=$(items_pick_exact "$J" "없는이름")
+[ -z "$i" ] && ok "일치 없음 = 빈 값" || bad "일치 없음" "i=$i"
+
+echo "== 14. ⭐ 정확 일치가 둘이면 빈 값 — 골라주면 안 된다 =="
+# 모호한 걸 임의로 고르면 **엉뚱한 비밀이 파일에 쓰인다.** 사람이 정해야 한다.
+J2='[{"id":"aaa","name":"dup"},{"id":"bbb","name":"dup"}]'
+i=$(items_pick_exact "$J2" "dup")
+[ -z "$i" ] && ok "중복 = 빈 값 (사람에게 넘긴다)" || bad "중복" "i=$i"
+
+echo "== 15. 대소문자는 구분한다 (다른 항목일 수 있다) =="
+i=$(items_pick_exact "$J" "ADMIN@BSVIBE.DEV")
+[ -z "$i" ] && ok "대소문자 다르면 일치 아님" || bad "대소문자" "i=$i"
+
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAILED"; exit 1; fi

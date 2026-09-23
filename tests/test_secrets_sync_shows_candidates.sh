@@ -24,8 +24,8 @@ case "$1" in
   status) echo '{"status":"unlocked","userEmail":"x@y"}' ;;
   unlock) echo "STUB-SESSION" ;;
   sync)   : ;;
-  get)    exit 1 ;;
-  list)   echo '[{"name":"BSVibe E2E Live"},{"name":"bsvibe-admin"}]' ;;
+  get)    echo "More than one result was found." >&2; exit 1 ;;
+  list)   echo '[{"id":"i1","name":"BSVibe E2E Live"},{"id":"i2","name":"bsvibe-admin"}]' ;;
   *)      : ;;
 esac
 STUB
@@ -65,6 +65,13 @@ case "$out2" in *"BSVibe"*) bad "후보가 없는데 후보를 지어낸다" "ou
 
 echo "== 5. 비밀은 어느 경로에서도 안 찍힌다 =="
 case "$out$out2" in *STUB-SESSION*) bad "세션 키가 출력됐다" "유출" ;; *) ok "세션 키가 출력되지 않는다" ;; esac
+
+echo "== 6. ⭐ bw 의 사유를 버리지 않는다 =="
+# 이 레포는 keychain 경로에서 `2>/dev/null` 로 이유를 버린 전례가 있고,
+# secrets-sync 가 그 실수를 그대로 반복했다(2026-09-23). 사유가 보여야 한다.
+case "$out" in *"More than one result"*) ok "bw stderr 를 그대로 보여준다" ;;
+               *) bad "bw stderr 를 보여준다" "$(printf '%s' "$out" | head -2)" ;; esac
+case "$out" in *"rc="*) ok "종료코드도 말한다" ;; *) bad "종료코드" "out=$out" ;; esac
 
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAILED"; exit 1; fi
