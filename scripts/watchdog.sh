@@ -162,6 +162,35 @@ if [ -n "$orphans" ]; then
   add "$(printf '🧟 고아 폭주 프로세스: %s— 부모 없이 CPU 를 물고 있다. 세션이 남긴 잔존물이거나 원치 않는 지속. 확인: ps -o pid,ppid,%%cpu,etime,command -p <pid>' "$orphans")"
 fi
 
+# 9. 금고 세션 신선도 — **장애가 아니라 유지보수다.**
+# 2026-09-23: 형님이 금고에서 비밀번호를 꺼내려는 순간 invalid_grant 로 막혔다.
+# lastSync 가 2026-07-13 이었다 — 두 달 아무도 안 써서 만료된 걸 **필요한 그 순간에**
+# 알았다. 그래서 미리 알린다.
+#
+# ⚠️ `breaches` 에 넣지 않는다. 형님 원칙: 사람 대기를 🚨 프로덕션 알람으로 만들면
+#    그 알람이 곧 무시되고, 진짜 고장 때 아무도 안 본다. 별도 메시지 + 주 1회 디듀프.
+. "$(dirname "$0")/lib/vault_session.sh" 2>/dev/null || true
+if declare -F vault_session_verdict >/dev/null && command -v bw >/dev/null 2>&1; then
+  vault_last=$(bw status 2>/dev/null | sed -n 's/.*"lastSync":"\([^"]*\)".*/\1/p')
+  [ -z "$vault_last" ] && vault_last=null
+  vault_v=$(vault_session_verdict "$vault_last" "$now" "${VAULT_WARN_DAYS:-21}" "${VAULT_FAIL_DAYS:-30}")
+  if [ "$vault_v" = aging ] || [ "$vault_v" = stale ] || [ "$vault_v" = unknown ]; then
+    vault_days=$(vault_session_days "$vault_last" "$now")
+    vault_state="$HOME/.bsvibe/watchdog.vault.state"
+    vault_last_sent=0
+    [ -f "$vault_state" ] && vault_last_sent=$(cat "$vault_state" 2>/dev/null | tr -dc '0-9')
+    vault_last_sent=${vault_last_sent:-0}
+    # 주 1회면 충분하다. 이건 지금 당장 고칠 일이 아니라 **잊지 않게** 할 일이다.
+    if [ $(( now - vault_last_sent )) -ge $(( 7 * 86400 )) ]; then
+      vault_msg=$(vault_session_reason "$vault_v" "${vault_days:-?}")
+      curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+        -d chat_id="${TELEGRAM_CHAT_ID}" \
+        --data-urlencode text="$(printf '🔐 금고 점검 (장애 아님)\n\n%s' "$vault_msg")" >/dev/null 2>&1
+      printf '%s\n' "$now" > "$vault_state"
+    fi
+  fi
+fi
+
 # --- debounce + notify ---
 sig=$(printf '%b' "$breaches" | sort | md5 2>/dev/null || printf '%b' "$breaches" | md5sum | cut -d' ' -f1)
 last_sig=""; last_ts=0
