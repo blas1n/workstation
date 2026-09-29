@@ -1,0 +1,30 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    # Several tests exercise macOS-only tooling paths (keychain/launchd), and
+    # the scripts run on the macOS workstation, so test on macOS.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax check every script
+        run: |
+          for f in scripts/*.sh scripts/lib/*.sh tests/*.sh; do
+            bash -n "$f" || { echo "syntax error: $f"; exit 1; }
+          done
+
+      - name: Run tests
+        run: |
+          fails=0
+          for t in tests/test_*.sh; do
+            echo "::group::$t"
+            if bash "$t"; then echo "ok $t"; else echo "FAIL $t"; fails=$((fails + 1)); fi
+            echo "::endgroup::"
+          done
+          echo "failed: $fails"
+          [ "$fails" -eq 0 ]
