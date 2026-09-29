@@ -16,7 +16,7 @@ export PATH="/opt/homebrew/bin:$PATH"
 # kept serving 14-hour-old code).
 export DOCKER_CONTEXT=colima
 
-PROJECTS=(bloasis BSGateway BSNexus bsai BSForge BSage BSupervisor)
+PROJECTS=(bloasis BSGateway BSNexus bsai BSForge BSage BSupervisor hpgg-api)
 # Projects with a public demo stack (deploy/docker-compose.demo.yml + .env.demo)
 DEMO_PROJECTS=(BSGateway BSNexus BSage BSupervisor)
 LOG_DIR=~/Works/_infra/logs
