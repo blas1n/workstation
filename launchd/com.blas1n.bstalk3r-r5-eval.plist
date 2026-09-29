@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.blas1n.bstalk3r-r5-eval</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/blasin/Works/_infra/scripts/bstalk3r-r5-eval.sh</string>
+    </array>
+    <!-- Jan 5, 10:13 local. launchd has no year field: the script's date guard
+         (>= 2027-01-05) plus a done-marker make this a one-shot. Jan 5 2027 is a
+         Tuesday, after the 09:00 daily.sh has cached the 12-31 grouped bar. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Month</key><integer>1</integer>
+        <key>Day</key><integer>5</integer>
+        <key>Hour</key><integer>10</integer>
+        <key>Minute</key><integer>13</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/Users/blasin/Works/_infra/logs/bstalk3r-r5-eval.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/blasin/Works/_infra/logs/bstalk3r-r5-eval.log</string>
+</dict>
+</plist>
