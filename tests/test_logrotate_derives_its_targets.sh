@@ -36,10 +36,14 @@ grep -q 'targets=' "$S" && ok "reports the target count" || bad "reports the tar
 grep -qE 'targets.*-eq 0' "$S" && ok "fails when the set is empty" || bad "fails when the set is empty" "0개가 초록이 된다"
 
 echo "== 4. 실제로 돌려 보면 대상이 잡힌다 (양성 대조군) =="
-out=$(BSVIBE_LOGROTATE_MAX_BYTES=999999999999 bash "$S" 2>&1 | tail -1)
-n=$(printf '%s' "$out" | sed -n 's/.*targets=\([0-9]*\).*/\1/p')
-[ "${n:-0}" -gt 5 ] && ok "targets=${n} (>5)" || bad "targets" "out=$out"
-case "$out" in *rotated=0*) ok "상한이 크면 아무것도 안 돌린다" ;; *) bad "대조군" "out=$out" ;; esac
+if [ -n "${CI:-}" ]; then
+  echo "  SKIP — 실제 실행 (CI 러너에는 이 워크스테이션의 LaunchAgents 가 없다; 로컬에서만 도는 양성 대조군)"
+else
+  out=$(BSVIBE_LOGROTATE_MAX_BYTES=999999999999 bash "$S" 2>&1 | tail -1)
+  n=$(printf '%s' "$out" | sed -n 's/.*targets=\([0-9]*\).*/\1/p')
+  [ "${n:-0}" -gt 5 ] && ok "targets=${n} (>5)" || bad "targets" "out=$out"
+  case "$out" in *rotated=0*) ok "상한이 크면 아무것도 안 돌린다" ;; *) bad "대조군" "out=$out" ;; esac
+fi
 
 echo "== 5. 문법 =="
 bash -n "$S" 2>/dev/null && ok "bash -n clean" || bad "bash -n" "문법 오류"

@@ -62,8 +62,12 @@ case "$seen" in *rotate*) bad "대조군" "seen=$seen" ;; *) ok "상한이 크�
 
 echo "== 6. ⭐ 이 머신의 진짜 plist 에서도 집합이 비지 않는다 =="
 # 픽스처만 보면 파서가 실제 plist 형식(바이너리 포함)을 못 읽어도 초록이다.
-real=$(launchd_log_targets "$HOME/Library/LaunchAgents" | grep -c .)
-[ "${real:-0}" -gt 5 ] && ok "실제 plist 에서 ${real}개" || bad "실제 plist" "real=$real"
+if [ -n "${CI:-}" ]; then
+  echo "  SKIP — 실제 plist (CI 러너에는 이 워크스테이션의 LaunchAgents 가 없다; 로컬에서만 도는 양성 대조군)"
+else
+  real=$(launchd_log_targets "$HOME/Library/LaunchAgents" | grep -c .)
+  [ "${real:-0}" -gt 5 ] && ok "실제 plist 에서 ${real}개" || bad "실제 plist" "real=$real"
+fi
 
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAILED"; exit 1; fi
