@@ -18,13 +18,27 @@ jobs:
             bash -n "$f" || { echo "syntax error: $f"; exit 1; }
           done
 
+      # test_run_liveness needs docker (a throwaway Postgres); the macOS runner
+      # has none, so it runs in the `docker-tests` job below instead.
       - name: Run tests
         run: |
-          fails=0
+          fails=0 skips=0 ran=0
           for t in tests/test_*.sh; do
+            [ "$(basename "$t")" = test_run_liveness.sh ] && continue
             echo "::group::$t"
-            if bash "$t"; then echo "ok $t"; else echo "FAIL $t"; fails=$((fails + 1)); fi
+            out=$(bash "$t" 2>&1); rc=$?
+            echo "$out"
             echo "::endgroup::"
+            ran=$((ran + 1))
+            n=$(printf '%s\n' "$out" | grep -c 'SKIP —' || true); skips=$((skips + n))
+            if [ "$rc" -eq 0 ]; then echo "ok $t"; else echo "FAIL $t"; fails=$((fails + 1)); fi
           done
-          echo "failed: $fails"
+          echo "files run: $ran · failed: $fails · SKIP checks: $skips (machine-state positive controls that only run on the workstation)"
           [ "$fails" -eq 0 ]
+
+  docker-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run docker-backed tests
+        run: bash tests/test_run_liveness.sh
