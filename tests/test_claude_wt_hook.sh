@@ -11,7 +11,7 @@ HOOK="$(cd "$(dirname "$0")/.." && pwd)/scripts/claude-wt-hook.sh"
 # shellcheck source=/dev/null
 source "$HOOK"
 
-for f in wt_keep_reason project_of; do
+for f in wt_keep_reason project_of create_name_of; do
   if ! declare -F "$f" >/dev/null; then
     echo "FAIL: $f 가 정의되지 않았다 ($HOOK) — 빈 사유는 '지워도 됨'이 아니라 '미로드'다"
     exit 1
@@ -67,5 +67,9 @@ WORKS_DIR="$TMP" ; mkdir -p "$TMP/proj"
 out=$(printf '{"hook_event_name":"WorktreeRemove","cwd":"%s","worktree_path":"%s"}' "$TMP/proj" "$TMP/work" \
   | WORKS_DIR="$TMP" bash "$HOOK" 2>&1); rc=$?
 [ "$rc" -ne 0 ] && [ -d "$TMP/work" ] && ok "remove refused, dir kept" || bad "remove refused, dir kept" "rc=$rc out=$out"
+
+echo "== 7. Create 입력의 이름 필드는 name 이다 (2026-10-01: worktree_name 으로 읽어 모든 세션 생성이 실패) =="
+n=$(create_name_of '{"hook_event_name":"WorktreeCreate","cwd":"/w/hpgg","name":"bright-fox"}')
+[ "$n" = bright-fox ] && ok "reads .name" || bad "reads .name" "got '$n'"
 
 [ "$fails" -eq 0 ] && echo "all ok" || { echo "$fails failed"; exit 1; }
