@@ -7,7 +7,8 @@
 # 포트 슬롯·.env 까지 갖춘 채 생기게 한다. main/ 은 배포 체크아웃이라 세션이 직접 쓰지 않는다.
 #
 # 훅 계약 (code.claude.com/docs/en/hooks):
-#   stdin  : JSON. Create → worktree_name, cwd / Remove → worktree_path, cwd
+#   stdin  : JSON. Create → name, cwd / Remove → worktree_path, cwd
+#            (문서 요약엔 worktree_name 이라 돼 있었지만 2.1.286 바이너리가 실제로 보내는 건 name)
 #   Create : stdout 에 worktree 절대경로 **한 줄만**. 그래서 하위 스크립트 출력은 전부 stderr 로.
 #   Remove : exit 0 이면 정리 완료, 0 이 아니면 디렉터리가 남고 경고만 뜬다.
 #
@@ -26,6 +27,11 @@ project_of() {
   local rel="${1#"$WORKS_DIR"/}"
   [ "$rel" = "$1" ] && return 0
   printf '%s\n' "${rel%%/*}"
+}
+
+# WorktreeCreate 입력에서 세션 worktree 이름을 꺼낸다.
+create_name_of() {
+  jq -r '.name // .worktree_name // empty' <<<"$1"
 }
 
 # 지워도 잃을 게 없는 worktree 인가. 아니면 그 이유를 stdout 에 낸다(빈 값 = 지워도 됨).
@@ -51,8 +57,8 @@ main() {
   case "$event" in
     WorktreeCreate)
       local name branch wt_name
-      name=$(jq -r '.worktree_name // empty' <<<"$input")
-      [ -z "$name" ] && { echo "claude-wt-hook: worktree_name 이 없다" >&2; exit 1; }
+      name=$(create_name_of "$input")
+      [ -z "$name" ] && { echo "claude-wt-hook: 입력에 name 이 없다: $input" >&2; exit 1; }
       branch="claude/${name}"
       # create-worktree.sh 와 같은 규칙으로 디렉터리 이름을 만든다.
       wt_name=$(echo "$branch" | sed 's|/|-|g; s|[^a-zA-Z0-9._-]|-|g')
