@@ -11,7 +11,7 @@
 | BSForge | 8300 | - | 5436 | 6383 | FLOWER_PORT=5555 |
 | BSage | 8400 | 3400 | - | - | - |
 | MetaSummarizer | - | - | - | - | CLI only |
-| hpgg-api | 8800 (loopback) | - | - | - | SQLite volume `hpgg-api-data`; cloudflared `api.hpgg.win` (tunnel a71ccd4d, `~/.cloudflared/config.yml`) |
+| hpgg | 8800 (loopback) | - | - | - | SQLite volume `hpgg-api-data`; cloudflared `api.hpgg.win` (tunnel a71ccd4d, `~/.cloudflared/config.yml`) |
 
 ## Demo (interactive demo stack — +500 offset from prod)
 

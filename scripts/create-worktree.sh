@@ -34,11 +34,15 @@ get_base_ports() {
     BSVibe-Auth)    echo "- 5179 5438 6385" ;;
     bsvibe-python)  echo "- - - -" ;;
     bsvibe-app)     echo "8700 3700 5442 6387" ;;
+    hpgg)           echo "- - - -" ;;
+    BStalk3r)       echo "- - - -" ;;
+    BSPlay)         echo "- - - -" ;;
+    BStockReport)   echo "- - - -" ;;
     *)              return 1 ;;
   esac
 }
 
-ALL_PROJECTS="bloasis BSGateway BSNexus bsai BSForge BSage MetaSummarizer BSupervisor BSVibe-Auth bsvibe-python bsvibe-app"
+ALL_PROJECTS="bloasis BSGateway BSNexus bsai BSForge BSage MetaSummarizer BSupervisor BSVibe-Auth bsvibe-python bsvibe-app hpgg BStalk3r BSPlay BStockReport"
 
 # ─── Usage ───────────────────────────────────────────────────────────
 usage() {
@@ -179,6 +183,16 @@ MAIN_WT="${WORKS_DIR}/${PROJECT}/main"
 if [ -f "$MAIN_WT/.env" ]; then
   cp "$MAIN_WT/.env" "$WT_PATH/.env"
   echo "  Copied:  ${MAIN_WT}/.env → ${WT_PATH}/.env"
+fi
+
+# ─── Copy dev-only files from <project>/.dev ────────────────────────
+# main/ 은 배포 체크아웃이라 개발용 파일을 둘 수 없을 때가 있다 — hpgg 는
+# .dockerignore 가 .env 를 거르지 않고 서버가 .env 를 읽어서, main/.env 는
+# prod 이미지로 새어 들어간다. 그런 파일은 <project>/.dev/ 에 두고 여기서 복사한다.
+DEV_DIR="${WORKS_DIR}/${PROJECT}/.dev"
+if [ -d "$DEV_DIR" ]; then
+  cp -Rp "$DEV_DIR/." "$WT_PATH/"
+  echo "  Copied:  ${DEV_DIR}/ → ${WT_PATH}/"
 fi
 
 # ─── Summary ─────────────────────────────────────────────────────────

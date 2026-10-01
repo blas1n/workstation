@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "WorktreeCreate": [
+      { "hooks": [ { "type": "command", "command": "/Users/blasin/Works/_infra/scripts/claude-wt-hook.sh" } ] }
+    ],
+    "WorktreeRemove": [
+      { "hooks": [ { "type": "command", "command": "/Users/blasin/Works/_infra/scripts/claude-wt-hook.sh" } ] }
+    ]
+  }
+}

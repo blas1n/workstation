@@ -16,7 +16,7 @@ export PATH="/opt/homebrew/bin:$PATH"
 # kept serving 14-hour-old code).
 export DOCKER_CONTEXT=colima
 
-PROJECTS=(bloasis BSGateway BSNexus bsai BSForge BSage BSupervisor hpgg-api)
+PROJECTS=(bloasis BSGateway BSNexus bsai BSForge BSage BSupervisor hpgg)
 # Projects with a public demo stack (deploy/docker-compose.demo.yml + .env.demo)
 DEMO_PROJECTS=(BSGateway BSNexus BSage BSupervisor)
 LOG_DIR=~/Works/_infra/logs
@@ -129,6 +129,7 @@ for name in "${PROJECTS[@]}"; do
 
   if [ -f "$COMPOSE" ]; then
     PROJECT_NAME=$(echo "$name" | tr '[:upper:]' '[:lower:]')
+    [ "$name" = hpgg ] && PROJECT_NAME=hpgg-api  # 기존 compose 프로젝트 유지
     # ``--force-recreate`` (Round 4 Phase 8 dogfood 2026-05-11): without
     # this, ``up -d --build`` rebuilds the image but compose silently
     # reuses an existing container when the image ID hash collides with
