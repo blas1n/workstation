@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.blas1n.claude-rc-ensure</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/blasin/Works/_infra/scripts/claude-rc-ensure.sh</string>
+  </array>
+  <!-- 부팅 시 + 60초마다: 죽은 Remote Control 서버(tmux rc-*)를 다시 띄운다. 살아 있으면 no-op. -->
+  <key>StartInterval</key><integer>60</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/Users/blasin/Works/_infra/logs/claude-rc-ensure.log</string>
+  <key>StandardErrorPath</key><string>/Users/blasin/Works/_infra/logs/claude-rc-ensure.log</string>
+</dict>
+</plist>

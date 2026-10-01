@@ -148,3 +148,23 @@ security add-generic-password -s bsvibe-e2e-live -a admin@bsvibe.dev -w
 
 - [port-map.md](port-map.md) — detailed port allocation map
 - All docker-compose files use `EXTERNAL_*_PORT` env vars for port overrides
+
+## Claude Remote Control 서버
+
+폰/claude.ai/code 에서 맥미니 세션을 그때그때 여는 상시 서버. 재부팅해도 launchd 가 다시 띄운다.
+
+- `scripts/claude-rc-ensure.sh` — 서버들을 tmux 세션 `rc-<이름>` 으로 유지 (launchd `com.blas1n.claude-rc-ensure`, 60초 주기)
+- `scripts/claude-wt-hook.sh` — WorktreeCreate/Remove 훅. 프로젝트 서버(`--spawn worktree`)의 새 세션을 `create-worktree.sh` 로 `<project>/wt/claude-<이름>` 에 만든다. 세션 종료 시 **변경 없음 + 전부 푸시됨** 일 때만 정리
+- 프로젝트 루트(`~/Works/<project>/.claude/settings.json`)에 `templates/claude-rc-project-settings.json` 을 둔다
+- 개발 전용 파일(main/ 에 두면 안 되는 .env 등)은 `<project>/.dev/` 에 두면 새 worktree 로 복사된다
+
+설치 (서버 디렉터리마다 신뢰 수락이 한 번 필요):
+
+```bash
+for d in ~/Works ~/Works/_infra ~/Works/{bsvibe-app,hpgg,bloasis,BStalk3r,BStockReport,BSPlay}; do (cd "$d" && claude); done  # 신뢰 → /exit
+ln -sf ~/Works/_infra/launchd/com.blas1n.claude-rc-ensure.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.blas1n.claude-rc-ensure.plist
+```
+
+상태: `tmux ls | grep rc-` · 로그: `logs/claude-rc-ensure.log` · 서버 화면: `tmux attach -t rc-<이름>`
+
