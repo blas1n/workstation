@@ -186,9 +186,9 @@ if [ -f "$MAIN_WT/.env" ]; then
 fi
 
 # ─── Copy dev-only files from <project>/.dev ────────────────────────
-# main/ 은 배포 체크아웃이라 개발용 파일을 둘 수 없을 때가 있다 — hpgg 는
-# .dockerignore 가 .env 를 거르지 않고 서버가 .env 를 읽어서, main/.env 는
-# prod 이미지로 새어 들어간다. 그런 파일은 <project>/.dev/ 에 두고 여기서 복사한다.
+# main/ 은 배포 체크아웃이라 개발용 설정을 거기 두지 않는다 — 위의 main/.env 복사는
+# 배포용 .env 를 그대로 가져온다. 개발 전용 파일(hpgg 의 개발용 .env, web/.env.local 등)은
+# <project>/.dev/ 에 두고 여기서 새 worktree 로 복사한다.
 DEV_DIR="${WORKS_DIR}/${PROJECT}/.dev"
 if [ -d "$DEV_DIR" ]; then
   cp -Rp "$DEV_DIR/." "$WT_PATH/"
