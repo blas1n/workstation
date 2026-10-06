@@ -46,23 +46,21 @@ fi
 # route answered 200 THROUGH THE WHOLE OUTAGE — so a heartbeat gated on it alone
 # would have kept pinging happily and the dead-man's switch would never fire.
 #
-# The deep reading exercises the auth dependency. A 4xx is HEALTHY here: it means
-# the app processed the request and its dependency answered (these credentials
-# are deliberately bogus, and the call creates nothing). Only 5xx / no-connection
-# mean the dependency is gone.
-DEEP_URL="${BSVIBE_DEEP_URL:-https://api.bsvibe.dev/api/auth/login}"
-deep="$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
-  -X POST -H 'Content-Type: application/json' \
-  --data '{"email":"offbox-probe@invalid.example","password":"not-a-real-password"}' \
-  "$DEEP_URL" 2>/dev/null)"
+# The deep reading exercises the auth dependency: ``/api/health/auth`` relays
+# GoTrue's own ``/auth/v1/health`` — 200 healthy, 503 down. Only 200 is healthy.
+#
+# Until 2026-10-06 this POSTed bogus credentials to ``/api/auth/login`` and
+# called the 4xx healthy. Every reading was a FAILED SIGN-IN: a
+# ``supabase_token_failed`` warning in prod once a minute (burying real failed
+# logins) and a share of the per-IP sign-in rate limit that every user's login
+# is proxied through.
+DEEP_URL="${BSVIBE_DEEP_URL:-https://api.bsvibe.dev/api/health/auth}"
+deep="$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$DEEP_URL" 2>/dev/null)"
 deep="${deep:-000}"
-case "$deep" in
-  2??|4??) ;;
-  *)
-    echo "[$ts] app is up but its auth dependency is down ($DEEP_URL HTTP $deep) — withholding heartbeat." >&2
-    exit 1
-    ;;
-esac
+if [ "$deep" != "200" ]; then
+  echo "[$ts] app is up but its auth dependency is down ($DEEP_URL HTTP $deep) — withholding heartbeat." >&2
+  exit 1
+fi
 
 # Healthy — ping the dead-man's-switch. ``/fail`` is not used; absence IS the signal.
 if curl -fsS -m 15 "$PING_URL" >/dev/null 2>&1; then
