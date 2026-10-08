@@ -36,6 +36,7 @@ mkdir -p "$LOG_DIR"
 # 브랜치에 대해 언제나 성공한다. tests/test_deploy_ref_guard.sh 가 그 사실을 고정한다.
 # shellcheck source=lib/deploy_ref_guard.sh
 . "$(dirname "$0")/lib/deploy_ref_guard.sh"
+. "$(dirname "$0")/lib/prod_log_archive.sh"
 
 for name in "${PROJECTS[@]}"; do
   BARE=~/Works/${name}/.bare
@@ -313,6 +314,10 @@ done
         # simply never deployed, with nothing anywhere to show the drift.
         GIT_SHA=$(git -C "$WORK" rev-parse --short HEAD 2>/dev/null || echo prod)
         export GIT_SHA
+        # The recreate below deletes the containers — and their json-file logs with
+        # them. Keep them first (2026-10-07: the MCP tool calls behind #1145 were
+        # gone five deploys later). Never blocks the deploy.
+        archive_prod_container_logs "$LOG_DIR/bsvibe-prod" 20 bsvibe-prod-backend-1 bsvibe-prod-worker-1
         # shellcheck disable=SC2086 -- intentional word-split: empty RECREATE_SVCS = all services
         if docker compose -p bsvibe-prod \
              -f "$COMPOSE_BASE" -f "$COMPOSE_PROD" --env-file "$ENV_PROD" \
