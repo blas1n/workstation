@@ -168,3 +168,15 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.blas1n.claude-rc-ens
 
 상태: `tmux ls | grep rc-` · 로그: `logs/claude-rc-ensure.log` · 서버 화면: `tmux attach -t rc-<이름>`
 
+- 남은 worktree 정리: 세션을 지우지 않고 두면 WorktreeRemove 훅이 안 불린다. ensure 가 10분마다 `wt/claude-*` 중
+  쓰는 세션 없음 · 2시간 활동 없음 · 변경 없음 + 전부 푸시됨 · (main 보다 앞서면) PR MERGED/CLOSED 인 것만 지운다 (`scripts/lib/claude_wt_gc.sh`)
+- **로그인 만료** (서버가 뜨자마자 죽고 60초마다 재시작 → 텔레그램 알림): 서버는 launchd 쪽이라 **키체인**을,
+  SSH 로 띄운 claude 는 키체인이 잠겨 있어 **~/.claude/.credentials.json** 을 쓴다. 회전하는 refresh token 을 두 저장소가
+  나눠 가지면 한쪽이 갱신할 때 다른 쪽이 죽는다. SSH 에서 그냥 `claude auth login` 하면 파일만 바뀌어 서버는 계속 죽는다:
+
+```bash
+ssh bsserver
+security unlock-keychain ~/Library/Keychains/login.keychain-db   # 키체인을 열고
+claude auth login                                                 # 키체인에 새로 저장 → 1분 안에 서버 복구
+```
+

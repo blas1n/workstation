@@ -46,3 +46,55 @@ for s in "${SERVERS[@]}"; do
   tmux new-session -d -s "$sess" -c "$dir" \
     "claude remote-control --name $name --permission-mode auto $opts; sleep 5"
 done
+
+# ─── 남은 worktree 정리 (10분마다) ───────────────────────────────────
+# 판정은 lib/claude_wt_gc.sh. 지우는 건 claude-* 만 — 사람이 만든 worktree 는 건드리지 않는다.
+INFRA="$(cd "$(dirname "$0")/.." && pwd)"
+mkdir -p "$INFRA/logs"
+GC_STAMP="$INFRA/logs/.claude-wt-gc.last"
+if [ $(( $(date +%s) - $(cat "$GC_STAMP" 2>/dev/null || echo 0) )) -ge 600 ]; then
+  date +%s > "$GC_STAMP"
+  # shellcheck source=/dev/null
+  . "$INFRA/scripts/claude-wt-hook.sh"
+  # shellcheck source=/dev/null
+  . "$INFRA/scripts/lib/claude_wt_gc.sh"
+  cwds=$(mktemp)
+  claude_wt_gc_cwds > "$cwds"
+  for wt in "$W"/*/wt/claude-*/; do
+    wt="${wt%/}"
+    [ -d "$wt" ] || continue
+    project=$(basename "$(dirname "$(dirname "$wt")")")
+    [ -n "$(gc_skip_reason "$wt" "$cwds")" ] && continue
+    if "$INFRA/scripts/remove-worktree.sh" "$project" "$(basename "$wt")" >/dev/null 2>&1; then
+      echo "$(date '+%F %T') [gc] $project/$(basename "$wt") 정리"
+    else
+      echo "$(date '+%F %T') [gc] $project/$(basename "$wt") 정리 실패"
+    fi
+  done
+  rm -f "$cwds"
+fi
+
+# ─── 반복 재시작 알림 ────────────────────────────────────────────────
+# 2026-10-11: 로그인이 만료되자 서버가 뜨자마자 죽고 60초마다 다시 떴다 — 폰에서
+# "OAuth session expired" 를 보기 전까지 아무도 몰랐다. 정상이면 10분간 "시작" 이
+# 거의 없다. 서버당 두 번 넘게 다시 떴고 **지금도**(최근 2분) 뜨고 있으면 알린다
+# (한 시간에 한 번). 지금 조건이 없으면 이미 풀린 루프를 10분 뒤까지 알린다.
+LOG="${CLAUDE_RC_LOG:-$INFRA/logs/claude-rc-ensure.log}"
+ALERT_STAMP="$INFRA/logs/.claude-rc-alert.last"
+since=$(date -v-10M '+%F %T')
+starts=$(awk -v s="$since" 'substr($0,1,19) >= s && /\] 시작 \(/' "$LOG" 2>/dev/null | wc -l | tr -d ' ')
+now_starts=$(awk -v s="$(date -v-2M '+%F %T')" 'substr($0,1,19) >= s && /\] 시작 \(/' "$LOG" 2>/dev/null | wc -l | tr -d ' ')
+if [ "${starts:-0}" -gt $(( ${#SERVERS[@]} * 2 )) ] && [ "${now_starts:-0}" -gt 0 ] &&
+   [ $(( $(date +%s) - $(cat "$ALERT_STAMP" 2>/dev/null || echo 0) )) -ge 3600 ]; then
+  date +%s > "$ALERT_STAMP"
+  echo "$(date '+%F %T') [alert] 10분간 재시작 ${starts}회"
+  ENV_FILE="${WATCHDOG_ENV:-$HOME/.bsvibe/watchdog.env}"
+  # shellcheck source=/dev/null
+  [ -f "$ENV_FILE" ] && . "$ENV_FILE"
+  if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
+    curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+      -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="⚠️ 맥미니 Claude Remote Control 서버가 10분간 ${starts}회 재시작 — 로그인 만료일 수 있다.
+ssh bsserver → security unlock-keychain ~/Library/Keychains/login.keychain-db → claude auth login
+(상태: tmux attach -t rc-works)" >/dev/null 2>&1
+  fi
+fi
